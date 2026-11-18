@@ -7,7 +7,7 @@ Flutter app, or reports "not supported" for features that need app knowledge. Ex
 Bist.init(provider: MyBistProvider());
 ```
 
-A UI library (like [flutter_tlt](https://github.com/tatthangnt2/flutter_tlt)) ships its own provider; an app using that
+A UI library ships its own provider (extending `BistProvider` with its navigation, HTTP client and widgets); an app using that
 library extends it further (e.g. to add a Dio adapter).
 
 ## Screen, app
