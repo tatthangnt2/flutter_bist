@@ -1,0 +1,62 @@
+{
+  "schema": 4,
+  "type": "group",
+  "id": "parity",
+  "name": "Parity",
+  "cases": [
+    {
+      "type": "unit",
+      "id": "p.1",
+      "name": "Lệnh mới",
+      "steps": [
+        {
+          "cmd": "expect",
+          "text": "Đã lưu",
+          "match": "contains",
+          "count": 2
+        },
+        {
+          "cmd": "expect",
+          "text": "Nhận thông báo",
+          "checked": true
+        },
+        {
+          "cmd": "notExpect",
+          "text": "Tất cả",
+          "selected": false
+        },
+        {
+          "cmd": "expect",
+          "text": "Email",
+          "match": "regex",
+          "value": "^.+@.+$"
+        },
+        {
+          "cmd": "mockApi",
+          "api": "api/orders",
+          "status": 500,
+          "body": "{\"message\":\"Máy chủ bận\"}",
+          "delay": 200,
+          "times": 1,
+          "method": "GET"
+        },
+        {
+          "cmd": "offline",
+          "on": true
+        },
+        {
+          "cmd": "offline",
+          "on": false
+        },
+        {
+          "cmd": "resetApi"
+        },
+        {
+          "cmd": "tap",
+          "text": "Lưu",
+          "type": "button"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,23 @@
+name: flutter_bist_example
+description: Shows BIST running scripts inside a plain Flutter app (no extra libraries).
+publish_to: none
+version: 1.0.0+1
+
+environment:
+  sdk: ">=3.11.0 <4.0.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_bist:
+    path: ../
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/bist/
+

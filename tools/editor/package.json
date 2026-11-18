@@ -1,0 +1,13 @@
+{
+  "name": "flutter-bist-editor",
+  "private": true,
+  "type": "module",
+  "description": "BIST script library (bist.ts) and editor source. `npm run build` writes ../../bin/{editor.html,bist.mjs,bist.d.ts}.",
+  "scripts": {
+    "build": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.build.json && node build.mjs",
+    "check": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.build.json && node build.mjs --check"
+  },
+  "devDependencies": {
+    "typescript": "5.9.3"
+  }
+}

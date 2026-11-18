@@ -1,0 +1,3030 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BIST Editor</title>
+<!--
+  BIST Editor. Double-click to open in Chrome / Edge (file://),
+  no web server, no Node needed. Needs network access to load CodeMirror + TypeScript from cdnjs.
+  - A .bist file = compact JSON of one root script (TestGroup / TestSequence, schema 4) – sent straight to the app to run.
+  - Left: project tree (name, id). Center: steps of the selected item as
+    `export default { pre: [...], steps: [...], after: [...] }`. Right: properties. Bottom: Analysis (errors, warnings).
+  The bist.ts library is embedded below (source in tools/editor; run `npm run build` there after editing bist.ts or this file).
+-->
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/hint/show-hint.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/dialog/dialog.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/fold/foldgutter.min.css">
+<style>
+  :root {
+    --bg: #ffffff; --side: #f7f7f5; --line: #e8e7e3; --text: #1f1e1d; --muted: #77756f; --faint: #a19f98;
+    --hover: #eeede9; --sel: #e6e4de; --accent: #c96442; --accent-text: #ffffff; --link: #2563c9;
+    --ok: #2e7d4f; --err: #c4362c; --warn: #a2610a; --menu: #ffffff; --shadow: 0 8px 28px rgba(20,20,10,.14), 0 1px 3px rgba(20,20,10,.08);
+    --code-bg: #ffffff; --input-bg: #ffffff;
+    --tk-kw: #8b2fc9; --tk-str: #1b7f45; --tk-num: #b35c00; --tk-cm: #9a978f; --tk-def: #2559b8; --tk-prop: #0f6b8a; --tk-var2: #a1325f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #262624; --side: #1f1e1d; --line: #3a3936; --text: #ecebe7; --muted: #a8a59d; --faint: #7d7a73;
+      --hover: #302f2c; --sel: #3a3935; --accent: #d97757; --accent-text: #ffffff; --link: #7aa7f0;
+      --ok: #5cc28a; --err: #ff7a6e; --warn: #e6a94e; --menu: #2f2e2b; --shadow: 0 8px 28px rgba(0,0,0,.5), 0 1px 3px rgba(0,0,0,.4);
+      --code-bg: #262624; --input-bg: #1f1e1d;
+      --tk-kw: #c792ea; --tk-str: #8fd18f; --tk-num: #f2a65a; --tk-cm: #77746d; --tk-def: #82aaff; --tk-prop: #7fd4e8; --tk-var2: #f07899;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #262624; --side: #1f1e1d; --line: #3a3936; --text: #ecebe7; --muted: #a8a59d; --faint: #7d7a73;
+    --hover: #302f2c; --sel: #3a3935; --accent: #d97757; --accent-text: #ffffff; --link: #7aa7f0;
+    --ok: #5cc28a; --err: #ff7a6e; --warn: #e6a94e; --menu: #2f2e2b; --shadow: 0 8px 28px rgba(0,0,0,.5), 0 1px 3px rgba(0,0,0,.4);
+    --code-bg: #262624; --input-bg: #1f1e1d;
+    --tk-kw: #c792ea; --tk-str: #8fd18f; --tk-num: #f2a65a; --tk-cm: #77746d; --tk-def: #82aaff; --tk-prop: #7fd4e8; --tk-var2: #f07899;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { height: 100%; }
+  body { margin: 0; font: 14px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif; background: var(--bg); color: var(--text); display: grid; grid-template-columns: var(--side-w, 300px) minmax(0, 1fr); overflow: hidden; }
+  svg.i { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+  button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+  .ibtn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; height: 30px; min-width: 30px; padding: 0 8px; border-radius: 8px; color: var(--muted); }
+  .ibtn:hover:not(:disabled) { background: var(--hover); color: var(--text); }
+  .ibtn.on { background: var(--sel); color: var(--text); }
+  .ibtn:disabled { opacity: .4; cursor: default; }
+  .muted { color: var(--muted); }
+
+  /* ===== Left sidebar ===== */
+  #side { position: relative; background: var(--side); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; }
+  #brand { display: flex; align-items: center; gap: 8px; padding: 12px 10px 8px 16px; }
+  #brand b { font-size: 15px; letter-spacing: .1px; }
+  #brand .ver { color: var(--faint); font-size: 12px; }
+  #brand .ibtn { height: 24px; min-width: 24px; padding: 0 4px; border-radius: 6px; gap: 0; }
+  #brand .ibtn svg { width: 14px; height: 14px; }
+  #brand { gap: 2px; }
+  #brand .sp { flex: 1; }
+  #tree { list-style: none; margin: 0; padding: 4px 8px 16px; overflow: auto; flex: 1; outline: none; }
+  #tree li { position: relative; display: flex; align-items: center; gap: 4px; height: 32px; padding-right: 4px; border-radius: 8px; cursor: pointer; white-space: nowrap; }
+  #tree li:hover { background: var(--hover); }
+  #tree li.on { background: var(--sel); }
+  #tree .tw { width: 18px; height: 18px; display: inline-flex; align-items: center; justify-content: center; color: var(--faint); border-radius: 4px; flex: none; }
+  #tree .tw svg { width: 13px; height: 13px; transition: transform .12s; }
+  #tree .tw.open svg { transform: rotate(90deg); }
+  #tree .tw:hover { color: var(--text); }
+  #tree .num { color: var(--faint); font-size: 12.5px; font-variant-numeric: tabular-nums; flex: none; }
+  #tree .nm { overflow: hidden; text-overflow: ellipsis; flex: 0 1 auto; }
+  #tree .id { color: var(--faint); font: 11.5px ui-monospace, Menlo, Consolas, monospace; overflow: hidden; text-overflow: ellipsis; flex: 0 1000 auto; min-width: 0; }
+  #tree .badge { font-size: 11px; flex: none; color: var(--muted); }
+  #tree .fill { flex: 1; }
+  #tree li.root .nm { font-weight: 700; }
+  #tree li.grp .nm { font-weight: 500; }
+  /* Item with errors: whole row red; group containing such an item: red dot */
+  #tree li.err .nm, #tree li.err .num, #tree li.err .id, #tree li.err .badge { color: var(--err); }
+  #tree .errdot { width: 6px; height: 6px; border-radius: 50%; background: var(--err); flex: none; margin-left: 2px; }
+  #tree .more { opacity: 0; height: 24px; min-width: 24px; padding: 0 4px; }
+  #tree li:hover .more, #tree li.on .more, #tree .more.on { opacity: 1; }
+  #sideEmpty { padding: 6px 16px; color: var(--muted); font-size: 13px; }
+  #sideEmpty a { color: var(--link); cursor: pointer; }
+
+  /* ===== Right side ===== */
+  #main { display: grid; grid-template-rows: 48px minmax(0, 1fr) auto; min-width: 0; min-height: 0; }
+  #top { display: flex; align-items: center; gap: 4px; padding: 0 10px 0 14px; border-bottom: 1px solid var(--line); min-width: 0; }
+  #crumb { display: flex; align-items: center; gap: 2px; min-width: 0; flex: 1; }
+  #projBtn { display: inline-flex; align-items: center; height: 30px; padding: 0 4px; font-weight: 600; max-width: 40%; }
+  #projBtn span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #crumb .sepc { color: var(--faint); padding: 0 2px; }
+  #nodeName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); }
+  #btnCloseNode { height: 22px; min-width: 22px; padding: 0 3px; margin-left: 4px; border-radius: 6px; }
+  #btnCloseNode svg { width: 13px; height: 13px; }
+  #noNode { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; color: var(--muted); background: var(--bg); z-index: 4; font-size: 13.5px; }
+  /* Find / replace bar (Android Studio style) */
+  #findBar { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 4px 6px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--line); background: var(--side); font-size: 12.5px; }
+  #findBar .row { display: flex; align-items: center; gap: 4px; min-width: 0; overflow: hidden; }
+  #findBar .row > * { flex-shrink: 0; }
+  #findBar .row > input[type=text] { flex-shrink: 1; }
+  #findBar input[type=text] { flex: 1 1 auto; min-width: 70px; height: 28px; padding: 0 8px; border: 1px solid var(--line); border-radius: 7px; background: var(--bg); color: var(--text); font: 12.5px ui-monospace, Menlo, Consolas, monospace; }
+  #findBar input[type=text]:focus { outline: none; border-color: var(--faint); box-shadow: 0 0 0 3px color-mix(in srgb, var(--faint) 25%, transparent); }
+  #findBar input.bad { border-color: var(--err); }
+  #findBar .tg { height: 26px; min-width: 28px; padding: 0 6px; border-radius: 6px; font: 600 11.5px ui-monospace, Menlo, Consolas, monospace; color: var(--muted); }
+  #findBar .tg:hover { background: var(--hover); color: var(--text); }
+  #findBar .tg.on { background: color-mix(in srgb, var(--link) 18%, transparent); color: var(--link); }
+  #findBar .ibtn { height: 26px; min-width: 26px; padding: 0 6px; }
+  #findBar .txt { white-space: nowrap; flex: none; padding: 0 9px; border: 1px solid var(--line); background: var(--bg); color: var(--text); border-radius: 7px; height: 26px; }
+  #findBar .txt:hover:not(:disabled) { background: var(--hover); }
+  #findCount { color: var(--muted); padding: 0 2px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  #findCount:empty { display: none; }
+  #findCount.none { color: var(--err); }
+  #findToggle svg { transition: transform .12s; }
+  #findBar.repl #findToggle svg { transform: rotate(90deg); }
+  #findBar:not(.repl) .rrow { display: none; }
+  .cm-find { background: color-mix(in srgb, #f5c542 45%, transparent); border-radius: 2px; }
+  .cm-find-cur { background: color-mix(in srgb, #f08c00 70%, transparent); outline: 1px solid #d97706; border-radius: 2px; }
+  #dirty { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); margin-left: 6px; display: none; flex: none; }
+  #dirty.on { display: inline-block; }
+  #work { display: grid; grid-template-columns: minmax(0, 1fr) var(--props-w, 300px); min-height: 0; }
+  #work.noprops { grid-template-columns: minmax(0, 1fr) 0; }
+  #work.noprops #props { display: none; }
+  #center { display: flex; flex-direction: column; min-width: 0; min-height: 0; }
+  #editorWrap { flex: 1; min-height: 0; }
+  #sig { padding: 4px 14px; font: 12px/1.5 ui-monospace, Menlo, Consolas, monospace; color: var(--muted); white-space: pre-wrap; max-height: 64px; overflow: auto; border-top: 1px solid var(--line); min-height: 25px; }
+  #sig .p-on { color: var(--link); font-weight: 700; }
+  #welcome { position: absolute; inset: 0; display: grid; place-items: center; text-align: center; color: var(--muted); background: var(--bg); z-index: 5; }
+  #welcome h2 { color: var(--text); font-weight: 600; font-size: 20px; margin: 0 0 6px; }
+  #welcome .row { display: flex; gap: 8px; justify-content: center; margin-top: 16px; }
+  .btn { display: inline-flex; align-items: center; gap: 6px; height: 34px; padding: 0 14px; border-radius: 9px; border: 1px solid var(--line); background: var(--bg); color: var(--text); }
+  .btn:hover { background: var(--hover); }
+  .btn.primary { background: var(--text); border-color: var(--text); color: var(--bg); }
+  .btn.primary:hover { opacity: .9; background: var(--text); }
+
+  /* Properties */
+  #props { position: relative; border-left: 1px solid var(--line); overflow: auto; min-height: 0; }
+  #props h3 { margin: 0; padding: 14px 16px 6px; font-size: 13px; font-weight: 600; color: var(--muted); }
+  #props { display: flex; flex-direction: column; }
+  .ptabs { display: flex; gap: 2px; padding: 8px 10px 0; border-bottom: 1px solid var(--line); flex: none; }
+  .ptabs button { padding: 6px 10px; border-radius: 8px 8px 0 0; font-size: 13px; font-weight: 600; color: var(--muted); border-bottom: 2px solid transparent; }
+  .ptabs button.on { color: var(--text); border-bottom-color: var(--accent); }
+  #propForm { overflow: auto; flex: 1; min-height: 0; }
+  /* Agent */
+  #agent { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+  #agent[hidden] { display: none !important; }
+  #aiBar { display: flex; align-items: center; gap: 4px; padding: 6px 10px; border-bottom: 1px solid var(--line); font-size: 12px; }
+  #aiBar .sp { flex: 1; }
+  #aiBar .ibtn { height: 24px; min-width: 24px; padding: 0 4px; }
+  #agent { position: relative; }
+  /* AI source dialog: source list on the left, settings on the right, Cancel / OK at the bottom */
+  dialog.aidlg { width: min(860px, 94vw); height: min(620px, 90vh); padding: 0; }
+  dialog.aidlg[open] { display: flex; flex-direction: column; }
+  .aidlg .dh { display: flex; align-items: center; gap: 6px; padding: 10px 12px 10px 18px; border-bottom: 1px solid var(--line); }
+  .aidlg .dh b { flex: 1; font-size: 14px; }
+  .aibody { flex: 1; min-height: 0; display: grid; grid-template-columns: 250px minmax(0, 1fr); }
+  #aiSrcList { list-style: none; margin: 0; padding: 8px; overflow: auto; border-right: 1px solid var(--line); background: var(--side); }
+  #aiSrcList li { display: grid; grid-template-columns: 1fr auto; gap: 1px 6px; padding: 8px 10px; border-radius: 8px; cursor: pointer; }
+  #aiSrcList li:hover { background: var(--hover); }
+  #aiSrcList li.on { background: var(--sel); }
+  #aiSrcList .n { font-weight: 600; font-size: 13px; }
+  #aiSrcList .t { grid-column: 1 / -1; font-size: 11.5px; color: var(--faint); }
+  #aiSrcList .b { font-size: 10.5px; padding: 1px 6px; border-radius: 6px; align-self: center; white-space: nowrap; }
+  #aiSrcList .b.use { background: var(--accent); color: #fff; }
+  #aiSrcList .b.ok { color: var(--ok); }
+  #aiSrcList .b.no { color: var(--faint); }
+  .aipane { padding: 14px 18px 18px; overflow: auto; display: grid; gap: 12px; align-content: start; }
+  .aipane h4 { margin: 4px 0 0; font-size: 14px; }
+  .aipane h4:not(:first-child) { border-top: 1px solid var(--line); padding-top: 14px; margin-top: 6px; }
+  .aipane label { display: grid; gap: 4px; font-size: 12.5px; color: var(--muted); }
+  .aipane input, .aipane select { font: 13.5px system-ui, sans-serif; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--input-bg); color: var(--text); width: 100%; min-width: 0; }
+  .aipane .mrow { display: flex; gap: 6px; }
+  .aipane .mrow .ibtn { white-space: nowrap; border: 1px solid var(--line); height: 34px; }
+  .aifoot { display: flex; align-items: center; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--line); }
+  .aifoot .sp { flex: 1; }
+  .aifoot .btn { min-width: 84px; justify-content: center; }
+  @media (max-width: 640px) { .aibody { grid-template-columns: 1fr; grid-template-rows: auto 1fr; } #aiSrcList { border-right: 0; border-bottom: 1px solid var(--line); max-height: 170px; } }
+  .aiprog { font-size: 12px; color: var(--muted); }
+  .aihelp { font-size: 11.5px; color: var(--faint); }
+  .aihelp a { color: var(--link); }
+  #aiMsgs { list-style: none; margin: 0; padding: 10px; overflow: auto; flex: 1; min-height: 0; display: grid; gap: 10px; align-content: start; font-size: 13px; }
+  #aiMsgs { grid-template-columns: minmax(0, 1fr); }
+  #aiMsgs li { padding: 8px 10px; border-radius: 10px; line-height: 1.5; overflow-wrap: anywhere; min-width: 0; }
+  .aicard, .aicard .h { min-width: 0; }
+  .aicard .h span:first-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
+  #aiMsgs li.user { background: var(--sel); justify-self: end; max-width: 92%; white-space: pre-wrap; }
+  #aiMsgs li.ai { background: var(--side); border: 1px solid var(--line); }
+  #aiMsgs li.err { color: var(--err); border: 1px solid var(--err); }
+  #aiMsgs li.hint { color: var(--muted); font-size: 12.5px; }
+  #aiMsgs code { font: 12px ui-monospace, Menlo, Consolas, monospace; background: var(--hover); padding: 0 3px; border-radius: 4px; }
+  #aiMsgs pre { margin: 6px 0; padding: 8px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; overflow: auto; font: 11.5px/1.5 ui-monospace, Menlo, Consolas, monospace; white-space: pre; }
+  .aicard { border: 1px solid var(--accent); border-radius: 8px; margin: 6px 0; overflow: hidden; }
+  .aicard .h { display: flex; align-items: center; gap: 6px; padding: 5px 8px; background: color-mix(in srgb, var(--accent) 10%, transparent); font-size: 12px; font-weight: 600; }
+  .aicard .h .sp { flex: 1; }
+  .aicard pre { margin: 0 !important; border: 0 !important; border-radius: 0 !important; max-height: 260px; }
+  .aicard .btn { height: 24px; padding: 0 9px; font-size: 12px; white-space: nowrap; flex: none; }
+  .aicard .st { white-space: nowrap; flex: none; }
+  .aicard .st { font-weight: 500; }
+  .aicard.done { border-color: var(--line); opacity: .75; }
+  /* Input box: flush to the edges, no margin – text area on top, toolbar below */
+  #aiComposer { border-top: 1px solid var(--line); background: var(--input-bg); flex: none; }
+  #aiComposer:focus-within { border-top-color: var(--faint); }
+  #aiInput { display: block; width: 100%; resize: none; border: 0; outline: none; background: transparent; color: var(--text); font: 13.5px/1.45 system-ui, sans-serif; padding: 10px 12px 4px; min-height: 64px; max-height: 40vh; }
+  #aiTools { display: flex; align-items: center; gap: 2px; padding: 2px 6px 6px; }
+  #aiTools .sp { flex: 1; }
+  #aiTools .ibtn { height: 28px; min-width: 28px; padding: 0 5px; }
+  #aiChip { display: inline-flex; align-items: center; gap: 3px; height: 28px; max-width: 75%; padding: 0 8px; border-radius: 8px; font-size: 12px; color: var(--muted); }
+  #aiChip:hover, #aiChip.on { background: var(--hover); color: var(--text); }
+  #aiChip span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #aiChip svg { width: 12px; height: 12px; flex: none; }
+  #aiSend { width: 30px; height: 30px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; background: var(--accent); color: #fff; flex: none; }
+  #aiSend:disabled { opacity: .35; cursor: default; }
+  #aiSend svg { width: 16px; height: 16px; stroke-width: 2.4; }
+  #aiFiles { display: flex; flex-wrap: wrap; gap: 4px; padding: 8px 10px 0; }
+  #aiFiles:empty { display: none; }
+  .afile { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; height: 24px; padding: 0 4px 0 8px; border: 1px solid var(--line); border-radius: 7px; font-size: 12px; background: var(--bg); }
+  .afile span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .afile button { width: 18px; height: 18px; border-radius: 4px; display: inline-flex; align-items: center; justify-content: center; color: var(--muted); }
+  .afile button:hover { background: var(--hover); color: var(--text); }
+  .afile button svg { width: 11px; height: 11px; }
+  .afile img { width: 18px; height: 18px; object-fit: cover; border-radius: 3px; }
+  #aiMsgs li.user .afiles { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; white-space: normal; }
+  #propForm { padding: 4px 16px 16px; display: grid; gap: 12px; align-content: start; }
+  #propForm label { display: grid; gap: 4px; font-size: 12.5px; color: var(--muted); }
+  #propForm label.chk { display: flex; gap: 8px; align-items: center; color: var(--text); font-size: 13.5px; }
+  #propForm input[type=text], #propForm select, #propForm textarea { font: 13.5px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--input-bg); color: var(--text); width: 100%; }
+  #propForm textarea { resize: vertical; min-height: 54px; }
+  #propForm input:focus, #propForm select:focus, #propForm textarea:focus { outline: none; border-color: var(--faint); box-shadow: 0 0 0 3px color-mix(in srgb, var(--faint) 25%, transparent); }
+  #propForm ::placeholder { color: var(--faint); opacity: .8; }
+  #propForm .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  #propForm .bad-input { border-color: var(--err) !important; }
+  #propForm .field-err { color: var(--err); font-size: 11.5px; }
+  #propInfo { font-size: 12.5px; color: var(--muted); border-top: 1px solid var(--line); padding-top: 10px; }
+
+  /* Analysis */
+  #analysis { position: relative; border-top: 1px solid var(--line); display: flex; flex-direction: column; height: var(--ana-h, 190px); min-height: 0; }
+  /* Resize handles */
+  .split { position: absolute; z-index: 30; }
+  .split::after { content: ''; position: absolute; background: var(--link); opacity: 0; transition: opacity .15s; }
+  .split:hover::after, .split.drag::after { opacity: .6; }
+  .split-v { top: 0; bottom: 0; width: 7px; cursor: col-resize; }
+  .split-v::after { top: 0; bottom: 0; left: 3px; width: 2px; }
+  .split-h { left: 0; right: 0; height: 7px; cursor: row-resize; top: -4px; }
+  .split-h::after { left: 0; right: 0; top: 3px; height: 2px; }
+  #splitSide { right: -4px; } #splitProps { left: -4px; position: fixed; }
+  body.dragging { user-select: none; } body.dragging.col { cursor: col-resize; } body.dragging.row { cursor: row-resize; }
+  #analysis.min { height: 36px; }
+  #anaHead { display: flex; align-items: center; gap: 8px; padding: 0 10px 0 14px; height: 36px; flex: none; font-size: 13px; }
+  #anaHead b { font-weight: 600; }
+  #anaHead .sum { color: var(--muted); }
+  #anaHead .sp { flex: 1; }
+  #anaList { list-style: none; margin: 0; padding: 0 6px 8px; overflow: auto; flex: 1; font-size: 13px; }
+  #anaList li { display: flex; gap: 8px; align-items: baseline; padding: 4px 8px; border-radius: 6px; cursor: pointer; }
+  #anaList li:hover { background: var(--hover); }
+  #anaList .lv { flex: none; width: 14px; text-align: center; }
+  #anaList .where { color: var(--faint); font-size: 12px; flex: none; min-width: 64px; font-variant-numeric: tabular-nums; }
+  #anaList .bad .lv { color: var(--err); } #anaList .warn .lv { color: var(--warn); } #anaList .ok .lv { color: var(--ok); }
+  #anaList li.ok { cursor: default; color: var(--muted); }
+
+  /* CodeMirror */
+  .CodeMirror { height: 100%; font: 13px/1.6 ui-monospace, Menlo, Consolas, monospace; background: var(--code-bg); color: var(--text); }
+  .CodeMirror-gutters { background: var(--code-bg); border-right: 0; }
+  .CodeMirror-linenumber { color: var(--faint); }
+  .CodeMirror-cursor { border-left-color: var(--text); }
+  .CodeMirror-selected, .CodeMirror-focused .CodeMirror-selected { background: color-mix(in srgb, var(--link) 18%, transparent); }
+  .CodeMirror-activeline-background { background: color-mix(in srgb, var(--text) 4%, transparent); }
+  .CodeMirror-matchingbracket { color: var(--text) !important; background: color-mix(in srgb, var(--link) 18%, transparent); }
+  .cm-s-default .cm-keyword { color: var(--tk-kw); }
+  .cm-s-default .cm-string, .cm-s-default .cm-string-2 { color: var(--tk-str); }
+  .cm-s-default .cm-number, .cm-s-default .cm-atom { color: var(--tk-num); }
+  .cm-s-default .cm-comment { color: var(--tk-cm); font-style: italic; }
+  .cm-s-default .cm-def { color: var(--tk-def); }
+  .cm-s-default .cm-property { color: var(--tk-prop); }
+  .cm-s-default .cm-variable-2, .cm-s-default .cm-variable-3 { color: var(--tk-var2); }
+  .cm-s-default .cm-variable, .cm-s-default .cm-operator, .cm-s-default .cm-punctuation { color: var(--text); }
+  .cm-bist { color: var(--tk-def); font-weight: 600; }
+  .cm-section { color: var(--tk-kw); font-weight: 700; }
+  .cm-tvar { color: var(--tk-var2); font-weight: 600; }
+  .cm-err-mark { text-decoration: underline wavy var(--err); text-underline-offset: 3px; }
+  .gutter-err { color: var(--err); font-size: 10px; padding-left: 4px; }
+  /* VS Code style code folding: arrows in the gutter (shown on gutter hover), folded blocks show ⋯ */
+  .CodeMirror-foldgutter { width: 16px; }
+  .CodeMirror-foldgutter-open, .CodeMirror-foldgutter-folded { cursor: pointer; color: var(--faint); text-align: center; }
+  .CodeMirror-foldgutter-open:after { content: "⌄"; font-size: 13px; line-height: 1; position: relative; top: -2px; }
+  .CodeMirror-foldgutter-folded:after { content: "›"; font-size: 15px; color: var(--text); }
+  .CodeMirror-gutters .CodeMirror-foldgutter, .CodeMirror-gutter-elt.CodeMirror-foldgutter-open { transition: opacity .15s; }
+  .CodeMirror:not(:hover) .CodeMirror-foldgutter-open { opacity: 0; }
+  .CodeMirror-foldmarker { color: var(--muted); background: var(--hover); border: 1px solid var(--line); border-radius: 4px; padding: 0 5px; margin: 0 2px; font-family: inherit; text-shadow: none; cursor: pointer; }
+  .CodeMirror-hints { background: var(--menu); border: 1px solid var(--line); border-radius: 10px; padding: 4px; font: 12.5px/1.5 ui-monospace, Menlo, Consolas, monospace; z-index: 50; max-height: 280px; box-shadow: var(--shadow); }
+  .CodeMirror-hint { color: var(--text); padding: 3px 8px; border-radius: 6px; display: flex; gap: 8px; align-items: baseline; }
+  li.CodeMirror-hint-active { background: var(--sel); color: var(--text); }
+  .hint-kind { font-size: 10.5px; color: var(--faint); min-width: 50px; font-family: system-ui, sans-serif; }
+  .hint-src { margin-left: auto; font-size: 11px; color: var(--faint); font-family: system-ui, sans-serif; }
+  #hintDoc, #tip { position: fixed; z-index: 60; max-width: 440px; background: var(--menu); border: 1px solid var(--line); border-radius: 10px; padding: 8px 11px; box-shadow: var(--shadow); font-size: 12.5px; display: none; white-space: pre-wrap; }
+  #tip { pointer-events: none; max-width: 520px; }
+  #hintDoc code { font-family: ui-monospace, Menlo, Consolas, monospace; }
+  .CodeMirror-dialog { background: var(--menu); color: var(--text); border-color: var(--line); }
+  .CodeMirror-dialog input { color: var(--text); }
+
+  /* Claude-style menu */
+  .menu { position: fixed; z-index: 80; min-width: 230px; background: var(--menu); border: 1px solid var(--line); border-radius: 12px; padding: 6px; box-shadow: var(--shadow); display: none; }
+  .menu.on { display: block; }
+  .menu button { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 10px; border-radius: 7px; text-align: left; font-size: 13.5px; }
+  .menu button:hover:not(:disabled) { background: var(--hover); }
+  .menu button:disabled { opacity: .4; cursor: default; }
+  .menu button .k { margin-left: auto; color: var(--faint); font-size: 12px; padding-left: 16px; }
+  .menu button.danger { color: var(--err); }
+  .menu hr { border: 0; border-top: 1px solid var(--line); margin: 5px 4px; }
+
+  /* Find in project */
+  /* Taller; drag the bottom-right corner to resize (remembered in localStorage) */
+  dialog.search { width: var(--sdlg-w, min(820px, 92vw)); height: var(--sdlg-h, 78vh); min-width: 420px; min-height: 260px; max-width: 96vw; max-height: 94vh; resize: both; overflow: hidden; }
+  dialog.search[open] { display: flex; flex-direction: column; }
+  .srow { display: flex; align-items: center; gap: 6px; padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  .srow input { flex: 1; height: 32px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); color: var(--text); font: 13px ui-monospace, Menlo, Consolas, monospace; }
+  .srow input:focus { outline: none; border-color: var(--faint); }
+  .srow input.bad { border-color: var(--err); }
+  .srow .tg, #findBar .tg { height: 26px; min-width: 28px; padding: 0 6px; border-radius: 6px; font: 600 11.5px ui-monospace, Menlo, Consolas, monospace; color: var(--muted); }
+  .srow .tg:hover { background: var(--hover); color: var(--text); }
+  .srow .tg.on { background: color-mix(in srgb, var(--link) 18%, transparent); color: var(--link); }
+  #sCount { margin-left: 10px; font-size: 12.5px; flex: 1; }
+  #sCount.none { color: var(--err); }
+  #sList { list-style: none; margin: 0; padding: 6px; flex: 1; min-height: 0; overflow: auto; font-size: 13px; }
+  #sList .sh { display: flex; gap: 6px; align-items: baseline; padding: 8px 8px 3px; }
+  #sList .sh .num, #sList .sh .id { color: var(--faint); font-size: 12px; }
+  #sList .sh .id { font-family: ui-monospace, Menlo, Consolas, monospace; }
+  #sList .sh .c { margin-left: auto; color: var(--faint); font-size: 11.5px; }
+  #sList .sr { display: flex; gap: 10px; padding: 3px 8px 3px 22px; border-radius: 6px; cursor: pointer; font: 12.5px/1.5 ui-monospace, Menlo, Consolas, monospace; white-space: nowrap; overflow: hidden; }
+  #sList .sr:hover { background: var(--hover); }
+  #sList .ln { color: var(--faint); min-width: 44px; text-align: right; flex: none; }
+  #sList .tx { overflow: hidden; text-overflow: ellipsis; }
+  #sList mark { background: color-mix(in srgb, #f5c542 55%, transparent); color: inherit; border-radius: 2px; }
+  /* JSON */
+  dialog { border: 1px solid var(--line); border-radius: 14px; background: var(--bg); color: var(--text); width: min(920px, 92vw); padding: 0; box-shadow: var(--shadow); }
+  dialog::backdrop { background: rgba(0,0,0,.3); }
+  dialog .dh { display: flex; align-items: center; gap: 6px; padding: 10px 12px 10px 18px; border-bottom: 1px solid var(--line); }
+  dialog .dh b { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  dialog .dh .muted { white-space: nowrap; }
+  dialog pre { margin: 0; padding: 12px 18px; max-height: 70vh; overflow: auto; white-space: pre-wrap; word-break: break-word; font: 12px/1.55 ui-monospace, Menlo, Consolas, monospace; }
+  #toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--text); color: var(--bg); padding: 8px 14px; border-radius: 10px; font-size: 13px; box-shadow: var(--shadow); opacity: 0; pointer-events: none; transition: opacity .2s; z-index: 90; max-width: 80vw; }
+  #toast.on { opacity: 1; }
+  #toast.bad { background: var(--err); color: #fff; }
+
+  @media (max-width: 900px) {
+    body { grid-template-columns: 1fr; grid-template-rows: 38vh minmax(0, 1fr); }
+    #side { border-right: 0; border-bottom: 1px solid var(--line); }
+    #work { grid-template-columns: 1fr; grid-template-rows: minmax(260px, 1fr) auto; }
+    #props { border-left: 0; border-top: 1px solid var(--line); }
+  }
+</style>
+</head>
+<body>
+<svg width="0" height="0" style="position:absolute">
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+  <symbol id="i-stop" viewBox="0 0 24 24"><rect x="7" y="7" width="10" height="10" rx="1.5" fill="currentColor"/></symbol>
+  <symbol id="i-clip" viewBox="0 0 24 24"><path d="M20 11.5 12.5 19a5 5 0 0 1-7-7L13 4.5a3.3 3.3 0 0 1 4.7 4.7L10.2 16.7a1.7 1.7 0 0 1-2.4-2.4L14.5 7.6"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="m20 20-4.2-4.2"/></symbol>
+  <symbol id="i-undo" viewBox="0 0 24 24"><path d="M9 14 4 9l5-5"/><path d="M4 9h10.5a5.5 5.5 0 0 1 0 11H11"/></symbol>
+  <symbol id="i-redo" viewBox="0 0 24 24"><path d="m15 14 5-5-5-5"/><path d="M20 9H9.5a5.5 5.5 0 0 0 0 11H13"/></symbol>
+  <symbol id="i-chev" viewBox="0 0 24 24"><path d="m9 6 6 6-6 6"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/></symbol>
+  <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2.5"/><path d="M15 4v16"/></symbol>
+  <symbol id="i-code" viewBox="0 0 24 24"><path d="m8 7-5 5 5 5M16 7l5 5-5 5"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5Z"/></symbol>
+  <symbol id="i-file" viewBox="0 0 24 24"><path d="M14 3H6.5A1.5 1.5 0 0 0 5 4.5v15A1.5 1.5 0 0 0 6.5 21h11a1.5 1.5 0 0 0 1.5-1.5V8z"/><path d="M14 3v5h5"/></symbol>
+  <symbol id="i-open" viewBox="0 0 24 24"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H9l2 2h8.5A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/></symbol>
+  <symbol id="i-save" viewBox="0 0 24 24"><path d="M5 4h11l3 3v12a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1z"/><path d="M8 4v5h7V4M8 20v-6h8v6"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6H9l2 2h8.5A1.5 1.5 0 0 1 21 9.5v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5z"/><path d="M12 11v5M9.5 13.5h5"/></symbol>
+  <symbol id="i-test" viewBox="0 0 24 24"><path d="M9 3h6M10 3v6L5 18a2 2 0 0 0 1.8 3h10.4a2 2 0 0 0 1.8-3L14 9V3"/></symbol>
+  <symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V5.5A1.5 1.5 0 0 0 14.5 4h-9A1.5 1.5 0 0 0 4 5.5v9A1.5 1.5 0 0 0 5.5 16H8"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+  <symbol id="i-dn" viewBox="0 0 24 24"><path d="M12 5v14M6 13l6 6 6-6"/></symbol>
+  <symbol id="i-out" viewBox="0 0 24 24"><path d="M20 12H6M11 7l-5 5 5 5M3 5v14"/></symbol>
+  <symbol id="i-in" viewBox="0 0 24 24"><path d="M4 12h14M13 7l5 5-5 5M21 5v14"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4 20h4L19 9l-4-4L4 16z"/><path d="m13.5 6.5 4 4"/></symbol>
+  <symbol id="i-fmt" viewBox="0 0 24 24"><path d="M4 6h16M4 12h10M4 18h13"/></symbol>
+</svg>
+
+<aside id="side">
+  <div id="brand">
+    <b>BIST Editor</b><span class="ver" id="ver"></span><span class="sp"></span>
+    <button class="ibtn" id="btnUndo" disabled title="Undo project change (Ctrl+Z outside the code)"><svg class="i"><use href="#i-undo"/></svg></button>
+    <button class="ibtn" id="btnRedo" disabled title="Redo project change (Ctrl+Shift+Z / Ctrl+Y outside the code)"><svg class="i"><use href="#i-redo"/></svg></button>
+    <button class="ibtn" id="btnPlus" title="New group, test, or project"><svg class="i"><use href="#i-plus"/></svg></button>
+  </div>
+  <ul id="tree" tabindex="0"></ul>
+  <div class="split split-v" id="splitSide" title="Drag to resize"></div>
+  <div id="sideEmpty">No project open. <a id="lnkOpen">Open a .bist file</a> or <a id="lnkNew">create one</a>.</div>
+</aside>
+
+<div id="main">
+  <div id="top">
+    <div id="crumb">
+      <span id="projBtn"><span id="projName">No project</span></span>
+      <span class="sepc">›</span><span id="nodeName"></span><button class="ibtn" id="btnCloseNode" title="Close the code of this item" hidden><svg class="i"><use href="#i-x"/></svg></button><span id="dirty" title="Unsaved changes"></span>
+    </div>
+    <button class="ibtn on" id="btnProps" title="Show / hide properties"><svg class="i"><use href="#i-panel"/></svg></button>
+    <button class="ibtn" id="btnJson" title="View the JSON sent to the app" disabled><svg class="i"><use href="#i-code"/></svg>JSON</button>
+    <button class="ibtn" id="btnTheme" title="Light / dark"><svg class="i"><use href="#i-moon"/></svg></button>
+  </div>
+
+  <div id="work">
+    <section id="center">
+      <div id="findBar" hidden>
+        <button class="ibtn" id="findToggle" title="Show replace (Ctrl+R)"><svg class="i"><use href="#i-chev"/></svg></button>
+        <div class="row">
+          <input type="text" id="findInput" placeholder="Find" spellcheck="false">
+          <button class="tg" id="fCase" title="Match case">Cc</button>
+          <button class="tg" id="fWord" title="Words">W</button>
+          <button class="tg" id="fRegex" title="Regex">.*</button>
+          <span id="findCount"></span>
+          <button class="ibtn" id="findPrev" title="Previous occurrence (Shift+Enter / Shift+F3)"><svg class="i"><use href="#i-up"/></svg></button>
+          <button class="ibtn" id="findNext" title="Next occurrence (Enter / F3)"><svg class="i"><use href="#i-dn"/></svg></button>
+          <button class="ibtn" id="findClose" title="Close (Esc)"><svg class="i"><use href="#i-x"/></svg></button>
+        </div>
+        <span class="rrow"></span>
+        <div class="row rrow">
+          <input type="text" id="replInput" placeholder="Replace" spellcheck="false">
+          <button class="txt" id="replOne" title="Replace (Enter)">Replace</button>
+          <button class="txt" id="replAll" title="Replace all (Ctrl+Alt+Enter)">Replace All</button>
+        </div>
+      </div>
+      <div id="editorWrap" style="position:relative">
+        <textarea id="editor"></textarea>
+        <div id="noNode" hidden><div>Select a group or test in the tree to edit its steps.</div></div>
+        <div id="welcome">
+          <div>
+            <h2>BIST Editor</h2>
+            <div>Write test scripts for the app – <code>.bist</code> files.</div>
+            <div class="row">
+              <button class="btn primary" id="wOpen"><svg class="i"><use href="#i-open"/></svg>Open .bist file…</button>
+              <button class="btn" id="wReopen" hidden></button>
+              <button class="btn" id="wNew"><svg class="i"><use href="#i-plus"/></svg>New project</button>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div id="sig">Type for suggestions (Ctrl+Space) · hover a command for docs · Ctrl+Alt+L to format · Ctrl+D duplicate line · Ctrl+Shift+F find in project · Ctrl+S to save</div>
+    </section>
+    <section id="props">
+      <div class="split split-v" id="splitProps" title="Drag to resize"></div>
+      <div class="ptabs"><button class="on" data-ptab="props">Properties</button><button data-ptab="agent">✦ Agent</button></div>
+      <form id="propForm" autocomplete="off" onsubmit="return false"><span class="muted">Nothing selected.</span></form>
+      <div id="agent" hidden>
+        <div id="aiBar">
+          <span class="muted">Chat</span><span class="sp"></span>
+          <button class="ibtn" id="aiClear" title="New chat"><svg class="i"><use href="#i-edit"/></svg></button>
+        </div>
+        <dialog id="aiDlg" class="aidlg">
+          <div class="dh"><b>AI source &amp; mode</b><button class="ibtn" id="aiDlgX" title="Cancel (Esc)"><svg class="i"><use href="#i-x"/></svg></button></div>
+          <div class="aibody">
+            <ul id="aiSrcList"></ul>
+            <div class="aipane">
+              <h4 id="aiSrcTitle"></h4>
+              <div class="aihelp" id="aiHelp"></div>
+              <label id="aiBaseRow">Server URL<input type="text" id="aiBase" spellcheck="false" autocomplete="off"></label>
+              <label id="aiKeyRow">API key<input type="password" id="aiKey" placeholder="Paste your API key" autocomplete="off"></label>
+              <label>Model<div class="mrow"><input type="text" id="aiModel" list="aiModelList" spellcheck="false" autocomplete="off"><datalist id="aiModelList"></datalist><button class="ibtn" id="aiModels" title="Load the model list from this source">↻ Load list</button></div></label>
+              <div class="aihelp" id="aiPrivacy"></div>
+              <h4>Mode <span class="muted">(all sources)</span></h4>
+              <label>Mode<select id="aiKind">
+                <option value="ask">Ask – answers only, never changes the project</option>
+                <option value="agent">Agent – can write and change tests</option>
+              </select></label>
+              <label id="aiLevelRow">Autonomy<select id="aiLevel">
+                <option value="suggest">Ask before applying – changes shown as cards</option>
+                <option value="auto">Apply automatically – Undo to revert</option>
+              </select></label>
+            </div>
+          </div>
+          <div class="aifoot"><span class="muted" id="aiDlgNote"></span><span class="sp"></span><button class="btn" id="aiCancel">Cancel</button><button class="btn primary" id="aiOk">OK</button></div>
+        </dialog>
+        <ul id="aiMsgs"></ul>
+        <div id="aiComposer">
+          <div id="aiFiles"></div>
+          <textarea id="aiInput" rows="3" placeholder="Ask anything, or describe a test to write…" title="Enter to send · Shift+Enter for a new line · paste or drop files to attach"></textarea>
+          <div id="aiTools">
+            <button class="ibtn" id="aiAttach" title="Attach files (text, JSON, logs, screenshots)"><svg class="i"><use href="#i-plus"/></svg></button>
+            <button id="aiChip" title="Source, model, mode"><span id="aiModelLbl"></span><svg class="i"><use href="#i-down"/></svg></button>
+            <span class="sp"></span>
+            <button id="aiSend" title="Send (Enter)"><svg class="i"><use href="#i-send"/></svg></button>
+          </div>
+          <input type="file" id="aiFilePick" multiple hidden>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <section id="analysis">
+    <div class="split split-h" id="splitAna" title="Drag to resize"></div>
+    <div id="anaHead">
+      <b>Analysis</b><span class="sum" id="anaSum"></span><span class="sp"></span>
+      <button class="ibtn" id="btnAna" title="Collapse / expand"><svg class="i"><use href="#i-down"/></svg></button>
+    </div>
+    <ul id="anaList"></ul>
+  </section>
+</div>
+
+<div class="menu" id="menu"></div>
+<div id="hintDoc"></div>
+<div id="tip"></div>
+<div id="toast"></div>
+<dialog id="searchDlg" class="search">
+  <div class="dh">
+    <b>Find in Project</b><span id="sCount" class="muted"></span>
+    <button class="ibtn" id="sClose" title="Close (Esc)"><svg class="i"><use href="#i-x"/></svg></button>
+  </div>
+  <div class="srow">
+    <svg class="i"><use href="#i-search"/></svg>
+    <input type="text" id="sInput" placeholder="Text to find in names, ids and steps" spellcheck="false">
+    <button class="tg" id="sCase" title="Match case">Cc</button>
+    <button class="tg" id="sWord" title="Words">W</button>
+    <button class="tg" id="sRegex" title="Regex">.*</button>
+  </div>
+  <ul id="sList"></ul>
+</dialog>
+<dialog id="jsonDlg">
+  <div class="dh"><b>JSON for the app</b><span class="muted" id="jsonSize"></span>
+    <button class="ibtn" id="jsonPretty">Pretty</button><button class="ibtn" id="jsonCopy"><svg class="i"><use href="#i-copy"/></svg>Copy</button><button class="ibtn" id="jsonClose" title="Close (Esc)"><svg class="i"><use href="#i-x"/></svg></button></div>
+  <pre id="jsonText"></pre>
+</dialog>
+<input type="file" id="filePick" accept=".bist,.json,application/json" hidden>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/codemirror.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/mode/javascript/javascript.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/hint/show-hint.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/matchbrackets.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/edit/closebrackets.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/selection/active-line.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/comment/comment.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/dialog/dialog.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/search/searchcursor.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/search/search.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/fold/foldcode.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/fold/foldgutter.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/fold/brace-fold.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/codemirror/5.65.16/addon/fold/comment-fold.min.js"></script>
+<!-- Unminified build: typescript.min.js fails when getting signature help (getSignatureHelpItems) -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/typescript/5.8.3/typescript.js"></script>
+
+<!-- Embedded bist.ts library – generated by `npm run build` (tools/editor), do not edit by hand -->
+<script id="bist-src" type="text/plain">/**
+ * BIST – write, check, bundle and export test scripts in TypeScript. A single file:
+ * - **Script-writing library**: `import { TestGroup, TestUnit, tap, expect, … } from 'flutter_bist'` (resolves to this file / `bist.mjs`).
+ * - **Tools**: `transpile`, `typecheck`, `bundleMjs` (shared by `editor.html` and the command line).
+ * - **Editor page**: `npm run build` (in tools/editor) embeds this file into `bin/editor.html` – opens with a double click.
+ * - **Export from the command line**: `node bin/bist.mjs <scripts dir> <JSON dir> [--mjs <dir>]`:
+ *   `<id>.ts` → type check → standalone `<id>.mjs` (library embedded) → `node <id>.mjs` prints JSON → validate → `<id>.json` → app.
+ *   The app only receives JSON (it never runs downloaded code). Needs the `typescript` package (installed here or globally).
+ *
+ * The JSON format (schema 4) is identical to the Dart model `package:flutter_bist/model.dart` – the in-app runner reads it with `TestGroup.fromJson`.
+ * When changing commands / validation rules here, change the Dart model too. After editing this file run `npm run build` to regenerate `bin/bist.mjs`, `bin/bist.d.ts`.
+ *
+ * ```ts
+ * import { TestGroup, TestUnit, WidgetType, input, tap, expect, printJson } from 'flutter_bist';
+ *
+ * const login = (user: string, pass: string) => [
+ *   input(user, { text: 'Username' }),
+ *   input(pass, { text: 'Password' }),
+ *   tap({ text: 'SIGN IN', type: WidgetType.button }),
+ * ];
+ *
+ * printJson(TestGroup({ id: 'login', name: 'Login', cases: [
+ *   TestUnit({ name: 'Missing fields', steps: [...login('', ''), expect({ text: 'Please enter your username and password.' })] }),
+ * ] }));
+ * ```
+ */
+
+// Runs both in node and in the browser – no dependency on Node / DOM types
+declare const console: { log(...args: unknown[]): void; error(...args: unknown[]): void };
+declare const process: any;
+declare const btoa: ((s: string) => string) | undefined;
+
+/** JSON format version – same as `kTestScriptSchema` in the Dart model */
+export const SCHEMA = 4;
+
+// ==== Types ====
+
+export const WidgetType = { button: 'button', input: 'input', text: 'text', image: 'image' } as const;
+export type WidgetType = (typeof WidgetType)[keyof typeof WidgetType];
+
+export const LogLevel = { debug: 'debug', info: 'info', warn: 'warn', error: 'error', damage: 'damage', success: 'success' } as const;
+export type LogLevel = (typeof LogLevel)[keyof typeof LogLevel];
+
+export const SwipeDirection = { up: 'up', down: 'down', left: 'left', right: 'right' } as const;
+
+/** How `text` / `value` is compared: exact (default), contains, regular expression */
+export const TextMatch = { exact: 'exact', contains: 'contains', regex: 'regex' } as const;
+export type TextMatch = (typeof TextMatch)[keyof typeof TextMatch];
+
+/** HTTP method for mockApi */
+export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
+export type SwipeDirection = (typeof SwipeDirection)[keyof typeof SwipeDirection];
+
+/** One action (step) – the JSON sent to the app */
+export interface TestAction {
+  readonly cmd: string;
+  readonly [key: string]: unknown;
+}
+
+/** Widget finder: the widget must match **all** given properties */
+export interface Find {
+  /** Text on screen (including input labels / hints, tooltips, Semantics labels) – exact match */
+  text?: string;
+  /** The widget's `Key` (`ValueKey('login.submit')`) */
+  id?: string;
+  /** Widget kind */
+  type?: WidgetType;
+  /** Material icon name of an icon-only button (`add`, `logout`, …) */
+  icon?: string;
+  /** Only search on the screen with this route */
+  route?: string;
+  /** Only search inside a block (card, row, dialog) that contains this text */
+  inside?: string;
+  /** How `text` (and expect's `value`) is compared: `exact` (default), `contains`, `regex` regular expression */
+  match?: TextMatch;
+}
+
+/** Common options */
+export interface Opt {
+  /** Timeout (ms), default 5000 */
+  timeout?: number;
+  /** Note shown in the report */
+  note?: string;
+  /** Take a screenshot at this step (failed steps always take one) */
+  shot?: boolean;
+  /** Actions to run when the step fails; if they all pass, the run continues (one level only) */
+  onError?: TestAction[];
+}
+
+/** Extra conditions for expect / notExpect */
+export interface FieldState {
+  /** Button / field is enabled */
+  enabled?: boolean;
+  /** Current text in the input (after the app's filtering / trimming) */
+  value?: string;
+  /** Field has focus */
+  focused?: boolean;
+  /** Field hides its characters (password) */
+  obscured?: boolean;
+  /** Field's max length */
+  maxLength?: number;
+  /** Number of matching widgets on screen (e.g. a 20-row list); notExpect: any other number */
+  count?: number;
+  /** Checkbox / switch / radio next to the widget is on */
+  checked?: boolean;
+  /** Tab / chip / list item is selected */
+  selected?: boolean;
+}
+
+/** Properties shared by every node in the tree */
+export interface CaseProps {
+  name: string;
+  /** For calling it again (`runTest(id)`) and running it alone (`BIST_RUN=<id>`); unique across all files */
+  id?: string;
+  /** App version range `1.0.0+10` (inclusive) */
+  minVersion?: string;
+  maxVersion?: string;
+  /** Case that can't be automated (the reason) – result is "Needs tester" */
+  manual?: string;
+  /** Creates / changes data – only runs on non-Production servers */
+  writes?: boolean;
+  /** Setup / cleanup (TestGroup: around each child; TestSequence: once) */
+  pre?: TestAction[];
+  after?: TestAction[];
+}
+
+export interface TestUnitNode extends CaseProps {
+  readonly type: 'unit';
+  steps: TestAction[];
+}
+
+export interface TestGroupNode extends CaseProps {
+  readonly type: 'group' | 'sequence';
+  cases: TestCaseNode[];
+}
+
+export type TestCaseNode = TestUnitNode | TestGroupNode;
+
+// ==== Command table (same as `_fields` in the Dart model) ====
+
+const OPT = ['timeout', 'note', 'shot', 'onError'];
+const FIND_KEYS = ['text', 'id', 'type', 'icon', 'route', 'inside', 'match'];
+const FIELD_STATE = ['enabled', 'value', 'focused', 'obscured', 'maxLength', 'count', 'checked', 'selected'];
+const RESERVED_VARS = ['now', 'date', 'tc', 'i'];
+const STRING_KEYS = [
+  'text', 'id', 'icon', 'route', 'inside', 'note', 'value', 'script', 'path', 'name', 'tag', 'start', 'end',
+  'chars', 'format', 'url', 'key', 'message', 'yes', 'no', 'initial', 'hint', 'api',
+];
+
+/** Secret-looking keys / paths – getEnv, getLog refuse them */
+export const SECRET_PATTERN = /token|password|passwd|secret|crypto|apikey|api_key|private|cookie|authorization|header|credential|mat_?khau/i;
+
+/** Placeholders replaced at run time: `{{tc:group.field}}`, `{{env:key}}`, `{{date:+1}}`, `{{now}}`, `{{i}}`, `{{variable}}` */
+export const VALUE_PATTERN = /\{\{(tc:[^{}]+|env:[^{}]+|date(?::[+-]\d+)?|[A-Za-z_][A-Za-z0-9_]*)\}\}/g;
+
+const FIELDS: Record<string, { main: string[]; extra: string[]; find: boolean }> = {
+  // tap, input
+  tap: { main: [], extra: [], find: true },
+  tapLong: { main: [], extra: [], find: true },
+  tapDouble: { main: [], extra: [], find: true },
+  input: { main: ['value'], extra: [], find: true },
+  inputDate: { main: ['value'], extra: [], find: true },
+  inputDateRange: { main: ['start', 'end'], extra: [], find: true },
+  pickFile: { main: ['url'], extra: ['name'], find: false },
+  // check
+  expect: { main: [], extra: FIELD_STATE, find: true },
+  notExpect: { main: [], extra: FIELD_STATE, find: true },
+  // navigate, scroll, wait
+  back: { main: [], extra: [], find: false },
+  swipe: { main: ['direction'], extra: [], find: true },
+  wait: { main: ['ms'], extra: [], find: false },
+  runTest: { main: ['script'], extra: [], find: false },
+  // loops, generated data
+  loop: { main: ['from', 'to', 'steps'], extra: [], find: false },
+  loopWhile: { main: ['condition', 'steps'], extra: ['max'], find: false },
+  randInt: { main: ['name', 'min', 'max'], extra: ['format'], find: false },
+  randText: { main: ['name', 'minLength', 'maxLength'], extra: ['chars', 'format'], find: false },
+  // read values
+  getText: { main: ['name'], extra: [], find: true },
+  getLog: { main: ['name', 'tag'], extra: ['path', 'level'], find: false },
+  getEnv: { main: ['name', 'key'], extra: [], find: false },
+  // print, notify, ask the tester
+  log: { main: ['message'], extra: [], find: false },
+  toast: { main: ['message'], extra: [], find: false },
+  confirm: { main: ['message'], extra: ['yes', 'no'], find: false },
+  ask: { main: ['name', 'message'], extra: ['initial', 'hint'], find: false },
+  // for developers
+  nav: { main: ['path'], extra: [], find: false },
+  server: { main: ['name'], extra: [], find: false },
+  expectLog: { main: ['tag'], extra: ['level'], find: false },
+  // mock server (removed automatically when the run ends)
+  mockApi: { main: ['api'], extra: ['status', 'body', 'delay', 'times', 'method'], find: false },
+  offline: { main: [], extra: ['on'], find: false },
+  resetApi: { main: [], extra: [], find: false },
+};
+
+export const COMMANDS = Object.keys(FIELDS);
+
+// ==== Validation ====
+
+type Json = Record<string, unknown>;
+
+const isInt = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v);
+const isRatioOk = (v: unknown) => typeof v === 'string';
+
+function validateStep(raw: unknown, p: string, nested: boolean, e: string[]): void {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw) || !((raw as Json).cmd as string in FIELDS)) {
+    e.push(`${p}: unknown command – available: ${COMMANDS.join(', ')}`);
+    return;
+  }
+  const st = raw as Json;
+  const cmd = st.cmd as string;
+  const f = FIELDS[cmd];
+  const allowed = [...f.main, ...f.extra, ...(f.find ? FIND_KEYS : []), ...OPT];
+  for (const k of Object.keys(st)) {
+    if (k !== 'cmd' && !allowed.includes(k)) e.push(`${p}: ${cmd} has no parameter "${k}" (allowed: ${allowed.join(', ')})`);
+  }
+  for (const k of f.main) if (st[k] === undefined || st[k] === null) e.push(`${p}: ${cmd} is missing "${k}"`);
+  for (const k of STRING_KEYS) {
+    const v = st[k];
+    if (v !== undefined && v !== null && typeof v !== 'string') e.push(`${p}: ${k} must be a string`);
+    if (v === '' && k !== 'value') e.push(`${p}: ${k} must not be empty`);
+  }
+  const hasTarget = ['text', 'id', 'icon', 'type'].some((k) => st[k] != null);
+  if (['tap', 'tapLong', 'tapDouble'].includes(cmd) && !hasTarget) e.push(`${p}: ${cmd} needs at least one of text, id, icon, type`);
+  if ((cmd === 'expect' || cmd === 'notExpect') && !hasTarget && st.route == null) e.push(`${p}: ${cmd} needs at least one of ${FIND_KEYS.join(', ')}`);
+  for (const k of FIELD_STATE) {
+    if (cmd.endsWith('xpect') && st[k] != null && !hasTarget) e.push(`${p}: ${k} needs a widget to check (text, id, icon, type)`);
+  }
+  for (const k of ['focused', 'obscured', 'enabled', 'shot', 'checked', 'selected', 'on']) if (st[k] != null && typeof st[k] !== 'boolean') e.push(`${p}: ${k} must be true | false`);
+  if (st.match != null) {
+    if (!Object.values(TextMatch).includes(st.match as TextMatch)) e.push(`${p}: match must be ${Object.values(TextMatch).join(' | ')}`);
+    if (st.text == null && st.value == null) e.push(`${p}: match needs text or value`);
+    if (st.match === 'regex') {
+      for (const k of ['text', 'value']) {
+        const v = st[k];
+        if (typeof v === 'string' && !v.includes('{{')) { try { new RegExp(v); } catch { e.push(`${p}: ${k} is not a valid regex`); } }
+      }
+    }
+  }
+  if (st.count != null && !(isInt(st.count) && st.count >= 0)) e.push(`${p}: count must be an integer ≥ 0`);
+  if (cmd === 'mockApi') {
+    if (st.status != null && !(isInt(st.status) && st.status >= 100 && st.status <= 599)) e.push(`${p}: status must be 100..599`);
+    if (st.delay != null && !(isInt(st.delay) && st.delay >= 0)) e.push(`${p}: delay must be a number of ms ≥ 0`);
+    if (st.times != null && !(isInt(st.times) && st.times >= 1)) e.push(`${p}: times must be ≥ 1`);
+    if (st.method != null && !HTTP_METHODS.includes(st.method as string)) e.push(`${p}: method must be ${HTTP_METHODS.join(' | ')}`);
+    if (st.body != null && typeof st.body !== 'string') e.push(`${p}: body must be a string (JSON text)`);
+  }
+  for (const k of ['from', 'to', 'min', 'max', 'minLength', 'maxLength']) if (st[k] != null && !isInt(st[k])) e.push(`${p}: ${k} must be an integer`);
+  const mx = st.maxLength, mn = st.minLength;
+  if ((isInt(mx) && mx < 0) || (isInt(mn) && (mn < 0 || (isInt(mx) && mn > mx)))) e.push(`${p}: minLength ≤ maxLength, ≥ 0`);
+  if (cmd === 'randInt' && isInt(st.min) && isInt(st.max) && st.min > st.max) e.push(`${p}: min ≤ max`);
+  if (cmd === 'loopWhile' && isInt(st.max) && st.max < 1) e.push(`${p}: max ≥ 1`);
+  if (cmd === 'loop' && isInt(st.from) && isInt(st.to) && Math.abs(st.to - st.from) > 200) e.push(`${p}: loop allows at most 200 iterations`);
+  for (const k of ['key', 'path']) {
+    if ((cmd === 'getEnv' || cmd === 'getLog') && typeof st[k] === 'string' && SECRET_PATTERN.test(st[k] as string)) e.push(`${p}: secret values are not allowed (${k} "${st[k]}")`);
+  }
+  if (['randInt', 'randText', 'getText', 'getLog', 'getEnv', 'ask'].includes(cmd)) {
+    const n = st.name;
+    if (typeof n === 'string' && (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(n) || RESERVED_VARS.includes(n))) {
+      e.push(`${p}: variable name "${n}" may only contain letters, digits, _ and must not be ${RESERVED_VARS.join(', ')}`);
+    }
+  }
+  if (cmd === 'pickFile' && typeof st.url === 'string' && !/^(https:\/\/|\{\{)/.test(st.url)) e.push(`${p}: url must start with https://`);
+  if (st.type != null && !Object.values(WidgetType).includes(st.type as WidgetType)) e.push(`${p}: type must be ${Object.values(WidgetType).join(' | ')}`);
+  if (st.direction != null && !Object.values(SwipeDirection).includes(st.direction as SwipeDirection)) e.push(`${p}: swipe direction must be ${Object.values(SwipeDirection).join(' | ')}`);
+  if (st.level != null && !Object.values(LogLevel).includes(st.level as LogLevel)) e.push(`${p}: level must be ${Object.values(LogLevel).join(' | ')}`);
+  if (st.timeout != null && !(isInt(st.timeout) && st.timeout > 0)) e.push(`${p}: timeout must be a number of ms > 0`);
+  if (cmd === 'wait' && !(isInt(st.ms) && st.ms >= 0)) e.push(`${p}: wait needs a number of ms ≥ 0`);
+  if (cmd === 'loop' || cmd === 'loopWhile') {
+    const steps = st.steps;
+    if (!Array.isArray(steps) || !steps.length) e.push(`${p}: ${cmd} needs steps (at least 1 action)`);
+    else steps.forEach((s, j) => validateStep(s, `${p} steps[${j + 1}]`, false, e));
+  }
+  if (cmd === 'loopWhile') {
+    const c = st.condition as Json | undefined;
+    if (!c || typeof c !== 'object' || (c.cmd !== 'expect' && c.cmd !== 'notExpect')) e.push(`${p}: loopWhile needs a condition: expect(...) or notExpect(...)`);
+    else validateStep(c, `${p} condition`, true, e);
+  }
+  const list = st.onError;
+  if (list != null) {
+    if (nested) e.push(`${p}: commands inside onError cannot have their own onError (one level only)`);
+    else if (!Array.isArray(list) || !list.length) e.push(`${p}: onError must be a list of commands, e.g. [nav('login')]`);
+    else list.forEach((s, j) => validateStep(s, `${p} onError[${j + 1}]`, true, e));
+  }
+  void isRatioOk;
+}
+
+const VERSION = /^(\d+)\.(\d+)\.(\d+)(?:\+(\d+))?$/;
+
+function validateCase(raw: unknown, p: string, ids: Set<string>, e: string[], root = false): void {
+  if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
+    e.push(`${p}: must be a TestUnit / TestGroup / TestSequence`);
+    return;
+  }
+  const c = raw as Json;
+  const where = typeof c.name === 'string' ? `${p} "${c.name}"` : p;
+  if (!['unit', 'group', 'sequence'].includes(c.type as string)) e.push(`${where}: type must be unit | group | sequence`);
+  if (typeof c.name !== 'string' || !c.name.trim()) e.push(`${where}: name is required`);
+  if (c.id != null) {
+    if (typeof c.id !== 'string' || !/^[A-Za-z0-9._-]+$/.test(c.id)) e.push(`${where}: id may only contain letters, digits, . _ -`);
+    if (ids.has(String(c.id))) e.push(`${where}: id "${c.id}" is duplicated`);
+    ids.add(String(c.id));
+  } else if (root) e.push(`${where}: the root needs an id (same as the file name)`);
+  for (const k of ['minVersion', 'maxVersion']) if (c[k] != null && (typeof c[k] !== 'string' || !VERSION.test(c[k] as string))) e.push(`${where}: ${k} must look like 1.0.0+10`);
+  if (c.manual != null && typeof c.manual !== 'string') e.push(`${where}: manual must be a string (the reason)`);
+  if (c.writes != null && typeof c.writes !== 'boolean') e.push(`${where}: writes must be true | false`);
+  const allowed = ['type', 'id', 'name', 'minVersion', 'maxVersion', 'manual', 'writes', 'pre', 'after', ...(root ? ['schema'] : []), c.type === 'unit' ? 'steps' : 'cases'];
+  for (const k of Object.keys(c)) if (!allowed.includes(k)) e.push(`${where}: unknown field "${k}"`);
+  const actions = (k: string, required = false) => {
+    const list = c[k];
+    if (list == null) {
+      if (required && c.manual == null) e.push(`${where}: ${k} needs at least 1 action`);
+      return;
+    }
+    if (!Array.isArray(list)) return void e.push(`${where}: ${k} must be a list of actions`);
+    if (required && !list.length && c.manual == null) e.push(`${where}: ${k} needs at least 1 action`);
+    list.forEach((s, i) => validateStep(s, `${where} ${k}[${i + 1}]`, false, e));
+  };
+  actions('pre');
+  actions('after');
+  if (c.type === 'unit') actions('steps', true);
+  else if (c.type === 'group' || c.type === 'sequence') {
+    const cases = c.cases;
+    if (!Array.isArray(cases) || !cases.length) e.push(`${where}: cases needs at least 1 item`);
+    else cases.forEach((x, i) => validateCase(x, `${p}.${i + 1}`.replace('Root.', ''), ids, e));
+  }
+}
+
+/** Validates a script file's JSON (the root has `schema`), returns the list of errors. [fileName]: check the root id matches the file name. */
+export function validate(json: Json, fileName?: string): string[] {
+  const e: string[] = [];
+  if (json.schema !== SCHEMA) e.push(`schema must be ${SCHEMA}`);
+  if (json.type !== 'group' && json.type !== 'sequence') e.push('the root must be a TestGroup / TestSequence');
+  if (fileName) {
+    const base = fileName.replace(/^.*[\\/]/, '').replace(/\.(dart|m?[jt]s|json)$/, '');
+    if (base !== json.id) e.push(`root id "${json.id}" differs from the file name "${base}"`);
+  }
+  validateCase(json, 'Root', new Set(), e, true);
+  return e;
+}
+
+/** Every id and every `runTest` in the tree */
+export function collectIds(root: TestCaseNode): { ids: string[]; runTests: string[] } {
+  const ids: string[] = [], runTests: string[] = [];
+  const actions = (list?: unknown[]) => {
+    for (const a of (list ?? []) as Json[]) {
+      if (a.cmd === 'runTest') runTests.push(a.script as string);
+      actions(a.onError as unknown[]);
+      actions(a.steps as unknown[]);
+    }
+  };
+  const visit = (c: TestCaseNode) => {
+    if (c.id) ids.push(c.id);
+    actions(c.pre);
+    actions(c.after);
+    if (c.type === 'unit') actions(c.steps);
+    else c.cases.forEach(visit);
+  };
+  visit(root);
+  return { ids, runTests };
+}
+
+// ==== Building actions ====
+
+function build(cmd: string, args: Record<string, unknown>): TestAction {
+  const json: Json = { cmd };
+  for (const [k, v] of Object.entries(args)) {
+    if (v === undefined || v === null || (v === false && (k === 'enabled' || k === 'shot'))) continue;
+    json[k] = v;
+  }
+  const e: string[] = [];
+  validateStep(json, cmd, false, e);
+  if (e.length) throw new Error(e.join('\n'));
+  return Object.freeze(json) as TestAction;
+}
+
+const find = (f: Find = {}) => ({ text: f.text, id: f.id, type: f.type, icon: f.icon, route: f.route, inside: f.inside, match: f.match === 'exact' ? undefined : f.match });
+const opt = (o: Opt = {}) => ({ timeout: o.timeout, note: o.note, shot: o.shot, onError: o.onError });
+const state = (s: FieldState = {}) => ({ enabled: s.enabled, value: s.value, focused: s.focused, obscured: s.obscured, maxLength: s.maxLength, count: s.count, checked: s.checked, selected: s.selected });
+
+/** Test data provided by the app (`BistProvider.testData`, e.g. test accounts) – keeps passwords out of scripts */
+export const tc = (group: string, field: string) => `{{tc:${group}.${field}}}`;
+
+/** Environment info used directly in text (see getEnv) */
+export const env = (key: string) => `{{env:${key}}}`;
+
+// Tap, input
+/** Taps the widget matching all given properties */
+export const tap = (f: Find & Opt) => build('tap', { ...find(f), ...opt(f) });
+/** Long press (700 ms) */
+export const tapLong = (f: Find & Opt) => build('tapLong', { ...find(f), ...opt(f) });
+/** Double tap */
+export const tapDouble = (f: Find & Opt) => build('tapDouble', { ...find(f), ...opt(f) });
+/** Enters text (replaces existing text, '' clears it); no finder = the focused field. Dropdown: the text of the item to pick. */
+export const input = (value: string, f: Find & Opt = {}) => build('input', { value, ...find(f), ...opt(f) });
+/** Picks a date `dd/MM/yyyy` (or `{{date:+1}}`) */
+export const inputDate = (value: string, f: Find & Opt = {}) => build('inputDate', { value, ...find(f), ...opt(f) });
+/** Picks a date range */
+export const inputDateRange = (start: string, end: string, f: Find & Opt = {}) => build('inputDateRange', { start, end, ...find(f), ...opt(f) });
+/** Sample file for the next file / image picker: downloads `url` (https, cached) when reached */
+export const pickFile = (url: string, o: { name?: string; note?: string } = {}) => build('pickFile', { url, name: o.name, note: o.note });
+
+// Check
+/** Waits until a widget matching all properties is visible (scrolls to find it); only `route` = waits for that screen */
+export const expect = (f: Find & FieldState & Opt) => build('expect', { ...find(f), ...state(f), ...opt(f) });
+/** Waits until the widget is gone; with field conditions: the field must exist but not match them */
+export const notExpect = (f: Find & FieldState & Opt) => build('notExpect', { ...find(f), ...state(f), ...opt(f) });
+
+// Navigate, scroll, wait
+/** Goes back / closes the dialog */
+export const back = (o: Omit<Opt, 'timeout'> = {}) => build('back', opt(o));
+/** Swipe: up = see content below, down = pull to refresh; with a finder, swipes inside the scrollable containing that widget */
+export const swipe = (direction: SwipeDirection, f: Find & Omit<Opt, 'timeout'> = {}) => build('swipe', { direction, ...find(f), ...opt(f) });
+/** Waits exactly ms milliseconds */
+export const wait = (ms: number, o: { note?: string; shot?: boolean } = {}) => build('wait', { ms, ...opt(o) });
+/** Runs the item with this id (a sub-script), then continues */
+export const runTest = (script: string, o: { note?: string; onError?: TestAction[] } = {}) => build('runTest', { script, ...opt(o) });
+
+// Loops, generated data
+/** Repeats steps with {{i}} = from..to (at most 200 iterations) */
+export const loop = (from: number, to: number, steps: TestAction[], o: { note?: string; onError?: TestAction[] } = {}) =>
+  build('loop', { from, to, steps, ...opt(o) });
+/** While the condition (expect / notExpect) holds, runs steps; stops when it doesn't; fails after max iterations (default 20) */
+export const loopWhile = (condition: TestAction, steps: TestAction[], o: { max?: number; note?: string; onError?: TestAction[] } = {}) =>
+  build('loopWhile', { condition, steps, max: o.max, ...opt(o) });
+/** Random integer min..max saved to {{name}}; format may contain `{value}` */
+export const randInt = (name: string, min: number, max: number, o: { format?: string; note?: string } = {}) =>
+  build('randInt', { name, min, max, format: o.format, note: o.note });
+/** Random text of length minLength..maxLength saved to {{name}} */
+export const randText = (name: string, minLength: number, maxLength: number, o: { chars?: string; format?: string; note?: string } = {}) =>
+  build('randText', { name, minLength, maxLength, chars: o.chars, format: o.format, note: o.note });
+
+// Read values
+/** Text of a widget / input → {{name}} */
+export const getText = (name: string, f: Find & Omit<Opt, 'shot'>) => build('getText', { name, ...find(f), ...opt(f) });
+/** Value from the newest app log whose tag contains `tag`, at `path` (e.g. responseBody.data.userId) → {{name}} */
+export const getLog = (name: string, tag: string, o: { path?: string; level?: LogLevel; timeout?: number; note?: string; onError?: TestAction[] } = {}) =>
+  build('getLog', { name, tag, path: o.path, level: o.level, ...opt(o) });
+/** user.id, user.name, user.role, user.logged, app.id, app.name, app.version, env, server.name, server.url, route, setting:<name>, values provided by the app (`Bist.instance.values`, `BistProvider.env`) → {{name}} */
+export const getEnv = (name: string, key: string, o: { note?: string; onError?: TestAction[] } = {}) => build('getEnv', { name, key, ...opt(o) });
+
+// Print, notify, ask the tester
+/** Writes to the report and the BIST| log */
+export const log = (message: string, o: { note?: string } = {}) => build('log', { message, note: o.note });
+/** Short message on screen (3 seconds) */
+export const toast = (message: string, o: { note?: string } = {}) => build('toast', { message, note: o.note });
+/** Confirmation dialog for the tester: Yes passes, No fails (waits up to 5 minutes) */
+export const confirm = (message: string, o: { yes?: string; no?: string; timeout?: number; note?: string; onError?: TestAction[] } = {}) =>
+  build('confirm', { message, yes: o.yes, no: o.no, ...opt(o) });
+/** Dialog asking the tester for input (OTP…) → {{name}} */
+export const ask = (name: string, message: string, o: { initial?: string; hint?: string; timeout?: number; note?: string; onError?: TestAction[] } = {}) =>
+  build('ask', { name, message, initial: o.initial, hint: o.hint, ...opt(o) });
+
+// For developers
+/** Goes straight to a route */
+export const nav = (path: string, o: Opt = {}) => build('nav', { path, ...opt(o) });
+/** Switches the server, like picking one in the app's server settings */
+export const server = (name: string, o: { timeout?: number; note?: string; onError?: TestAction[] } = {}) => build('server', { name, ...opt(o) });
+/** Waits for an app log whose tag contains `tag` */
+export const expectLog = (tag: string, o: { level?: LogLevel; timeout?: number; note?: string; onError?: TestAction[] } = {}) =>
+  build('expectLog', { tag, level: o.level, ...opt(o) });
+
+// Mock server – removed automatically when the run ends
+/** Requests whose URL contains `api` (and match `method`, if given) get a fake response: `status` (default 200), `body` (JSON text or object),
+ *  after `delay` ms, for `times` requests, then it removes itself. Use it to test error screens, empty data, slow networks. */
+export const mockApi = (api: string, o: { status?: number; body?: string | object; delay?: number; times?: number; method?: HttpMethod; note?: string } = {}) =>
+  build('mockApi', { api, status: o.status, body: o.body == null || typeof o.body === 'string' ? o.body : JSON.stringify(o.body), delay: o.delay, times: o.times, method: o.method, note: o.note });
+/** Simulates going offline (`on` defaults to true) or back online (`on: false`): every request fails with "Disconnected" */
+export const offline = (o: { on?: boolean; note?: string } = {}) => build('offline', { on: o.on ?? true, note: o.note });
+/** Removes every active mockApi / offline */
+export const resetApi = (o: { note?: string } = {}) => build('resetApi', { note: o.note });
+
+// ==== Script tree ====
+
+function node<T extends TestCaseNode>(type: T['type'], p: CaseProps, body: Record<string, unknown>): T {
+  return {
+    type,
+    ...(p.id != null && { id: p.id }),
+    name: p.name,
+    ...(p.minVersion != null && { minVersion: p.minVersion }),
+    ...(p.maxVersion != null && { maxVersion: p.maxVersion }),
+    ...(p.manual != null && { manual: p.manual }),
+    ...(p.writes && { writes: true }),
+    ...(p.pre?.length && { pre: p.pre }),
+    ...(p.after?.length && { after: p.after }),
+    ...body,
+  } as unknown as T;
+}
+
+/** One test: the actions in steps */
+export const TestUnit = (p: CaseProps & { steps?: TestAction[] }): TestUnitNode => node('unit', p, { steps: p.steps ?? [] });
+
+/** Group: independent children; pre / after run around each child. One script file = one root TestGroup. */
+export const TestGroup = (p: CaseProps & { cases: TestCaseNode[] }): TestGroupNode => node('group', p, { cases: p.cases });
+
+/** Group run in order: if a child fails, the remaining children are skipped; pre / after run once */
+export const TestSequence = (p: CaseProps & { cases: TestCaseNode[] }): TestGroupNode => node('sequence', p, { cases: p.cases });
+
+/** Script file JSON (root with schema) */
+export const toRootJson = (root: TestGroupNode) => ({ schema: SCHEMA, ...root });
+
+/** Prints the script file JSON – at the end of each `<id>.ts` file: `printJson(script)`. Throws on errors instead of printing. */
+export function printJson(root: TestGroupNode): void {
+  const json = toRootJson(root);
+  const e = validate(json as unknown as Json);
+  if (e.length) throw new Error(`${root.name}:\n${e.join('\n')}`);
+  console.log(JSON.stringify(json, null, 2));
+}
+
+
+// ==== Tools: transpile, type check, bundle (shared by editor.html and the command line) ====
+
+/** Error with a line number */
+export interface Diagnostic {
+  line: number;
+  message: string;
+}
+
+// Minimal base types for type checking / completion in the browser (no TypeScript lib.d.ts there) – shared with editor.html
+export const MINI_LIB = `
+interface Array<T> { length: number; [n: number]: T; map<U>(f: (v: T, i: number) => U): U[]; filter(f: (v: T, i: number) => unknown): T[]; forEach(f: (v: T, i: number) => void): void; some(f: (v: T, i: number) => unknown): boolean; every(f: (v: T, i: number) => unknown): boolean; find(f: (v: T, i: number) => unknown): T | undefined; includes(v: T): boolean; indexOf(v: T): number; slice(a?: number, b?: number): T[]; join(s?: string): string; push(...v: T[]): number; concat(...v: (T | T[])[]): T[]; }
+interface ArrayConstructor { from<T>(a: { length: number }, f?: (v: unknown, i: number) => T): T[]; isArray(v: unknown): v is unknown[]; }
+declare const Array: ArrayConstructor;
+interface ReadonlyArray<T> { length: number; readonly [n: number]: T; }
+interface Boolean {} interface Function {} interface CallableFunction {} interface NewableFunction {} interface IArguments {}
+interface Number { toString(r?: number): string; } interface Object {} interface RegExp {}
+interface String { length: number; replace(a: string | RegExp, b: string): string; padStart(n: number, s?: string): string; toUpperCase(): string; toLowerCase(): string; trim(): string; }
+interface TemplateStringsArray extends ReadonlyArray<string> {}
+type Record<K extends keyof any, T> = { [P in K]: T };
+type Partial<T> = { [P in keyof T]?: T[P] };
+type Pick<T, K extends keyof T> = { [P in K]: T[P] };
+type Exclude<T, U> = T extends U ? never : T;
+type Omit<T, K extends keyof any> = Pick<T, Exclude<keyof T, K>>;
+declare const console: { log(...a: unknown[]): void };
+declare const Math: { random(): number; floor(n: number): number; ceil(n: number): number; round(n: number): number; min(...n: number[]): number; max(...n: number[]): number };
+declare const JSON: { stringify(v: unknown, r?: unknown, s?: number | string): string; parse(s: string): any };
+`;
+
+/** Transpiles TS → CommonJS JS (import 'flutter_bist' / '@tlt/bist' becomes require) – [ts] is the `typescript` module */
+export function transpile(ts: any, source: string, fileName: string): { code: string; errors: Diagnostic[] } {
+  const r = ts.transpileModule(source, { fileName, reportDiagnostics: true, compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } });
+  return { code: r.outputText, errors: toDiagnostics(ts, r.diagnostics ?? []) };
+}
+
+function toDiagnostics(ts: any, list: any[]): Diagnostic[] {
+  return list.map((d) => ({
+    line: d.file && d.start != null ? d.file.getLineAndCharacterOfPosition(d.start).line + 1 : 0,
+    message: ts.flattenDiagnosticMessageText(d.messageText, '\n'),
+  }));
+}
+
+/**
+ * Type checks a script (command names, parameter names, value types). [bist]: the contents of `bist.d.ts`, or `bist.ts` itself (the browser
+ * reads it directly, no build needed). [libFiles]: TypeScript lib files (the command line passes the real libs; the browser leaves it empty – minimal
+ * base types are used). Only returns errors of the script file.
+ */
+export function typecheck(ts: any, source: string, fileName: string, bist: string, libFiles?: Record<string, string>): Diagnostic[] {
+  const lib = libFiles ?? { 'lib.mini.d.ts': MINI_LIB };
+  const bistFile = /\bexport declare\b/.test(bist) ? 'node_modules/flutter_bist/index.d.ts' : 'node_modules/flutter_bist/index.ts';
+  const files: Record<string, string> = { [fileName]: source, [bistFile]: bist, ...lib };
+  const options = {
+    target: libFiles ? ts.ScriptTarget.ES2022 : ts.ScriptTarget.ES5,
+    module: ts.ModuleKind.ESNext,
+    moduleResolution: ts.ModuleResolutionKind.Node10,
+    noLib: true,
+    strict: true,
+    noEmit: true,
+    types: [],
+    skipLibCheck: true,
+  };
+  const host = {
+    getSourceFile: (n: string, v: any) => (n in files ? ts.createSourceFile(n, files[n], v, true) : undefined),
+    getDefaultLibFileName: () => Object.keys(lib)[0],
+    writeFile: () => {},
+    getCurrentDirectory: () => '',
+    getDirectories: () => [],
+    fileExists: (n: string) => n in files,
+    readFile: (n: string) => files[n],
+    getCanonicalFileName: (n: string) => n,
+    useCaseSensitiveFileNames: () => true,
+    getNewLine: () => '\n',
+    resolveModuleNames: (names: string[]) =>
+      names.map((m) => (m === 'flutter_bist' || m === '@tlt/bist' ? { resolvedFileName: bistFile, extension: bistFile.endsWith('.d.ts') ? '.d.ts' : '.ts' } : undefined)),
+  };
+  const program = ts.createProgram([fileName, ...Object.keys(lib)], options, host);
+  const sf = program.getSourceFile(fileName);
+  return toDiagnostics(ts, [...program.getSyntacticDiagnostics(sf), ...program.getSemanticDiagnostics(sf)]);
+}
+
+function base64(s: string): string {
+  if (typeof btoa === 'function') {
+    const bytes = new TextEncoder().encode(s);
+    let bin = '';
+    for (const b of bytes) bin += String.fromCharCode(b);
+    return btoa(bin);
+  }
+  return (globalThis as any).Buffer.from(s, 'utf8').toString('base64');
+}
+declare class TextEncoder {
+  encode(s: string): Uint8Array;
+}
+interface Uint8Array {
+  [Symbol.iterator](): IterableIterator<number>;
+}
+
+/**
+ * Standalone `.mjs` file: the library embedded ([bistSource] = contents of `bist.mjs`) + the transpiled script ([code], CommonJS).
+ * Run: `node <id>.mjs` (or import it in a module Web Worker) – prints JSON.
+ */
+export function bundleMjs(id: string, fileName: string, code: string, bistSource: string): string {
+  return `// ${id}.mjs – generated from ${fileName} (flutter_bist bin/bist.mjs), run: node ${id}.mjs
+const __bist = await import('data:text/javascript;base64,${base64(bistSource)}');
+const exports = {};
+const module = { exports };
+const require = (n) => { if (n === 'flutter_bist' || n === '@tlt/bist') return __bist; throw new Error('Only flutter_bist can be imported: ' + n); };
+${code}
+`;
+}
+
+// ==== Command line: node bin/bist.mjs <scripts dir> <JSON dir> [--mjs <dir>] ====
+
+const imp = (m: string): Promise<any> => import(m);
+
+async function main(argv: string[]): Promise<number> {
+  const [fs, path, url, cp, mod] = await Promise.all(['node:fs', 'node:path', 'node:url', 'node:child_process', 'node:module'].map(imp));
+  const self = url.fileURLToPath(import.meta.url);
+  const here = path.dirname(self);
+
+  // Embed bist.ts into the editor page (so it opens with a double click)
+  if (argv[0] === '--embed' && argv[1] && argv[2] && argv[3]) {
+    // node bist.mjs --embed <bist.ts> <editor.html source> <output editor.html>
+    const src = fs.readFileSync(argv[1], 'utf8');
+    if (/<\/script/i.test(src)) throw new Error('bist.ts must not contain a closing script tag');
+    const html = fs.readFileSync(argv[2], 'utf8');
+    const re = /(<script id="bist-src" type="text\/plain">)[\s\S]*?(<\/script>)/;
+    if (!re.test(html)) throw new Error(`${argv[2]} is missing <script id="bist-src" type="text/plain">`);
+    fs.writeFileSync(argv[3], html.replace(re, (_: string, a: string, b: string) => a + src + b));
+    console.log(`Embedded ${path.basename(argv[1])} into ${argv[3]}`);
+    return 0;
+  }
+  const args = [...argv];
+  const mjsFlag = args.indexOf('--mjs');
+  const mjsArg = mjsFlag >= 0 ? args.splice(mjsFlag, 2)[1] : null;
+  if (args.length !== 2) {
+    console.error('Usage: node bist.mjs <scripts dir> <JSON dir> [--mjs <.mjs dir>]');
+    return 2;
+  }
+  const [srcDir, outDir] = args.map((a: string) => path.resolve(a));
+  const mjsDir = path.resolve(mjsArg ?? path.join(srcDir, 'build'));
+
+  // typescript: next to this file, in the current directory, or installed globally
+  let ts: any;
+  for (const from of [self, path.join(here, '..', 'tools', 'editor', 'x.js'), path.join(process.cwd(), 'x.js')]) {
+    try {
+      ts = mod.createRequire(from)('typescript');
+      break;
+    } catch {
+      // try the next location
+    }
+  }
+  if (!ts) {
+    try {
+      const root = cp.execSync('npm root -g', { encoding: 'utf8' }).trim();
+      ts = mod.createRequire(path.join(root, 'x.js'))('typescript');
+    } catch {
+      console.error('Missing the typescript package: run `npm install` in flutter_bist/tools/editor (or `npm i -g typescript`)');
+      return 2;
+    }
+  }
+  const bistSource = fs.readFileSync(self, 'utf8');
+  const dtsPath = path.join(here, 'bist.d.ts');
+  if (!fs.existsSync(dtsPath)) {
+    console.error(`Missing ${dtsPath}: run \`npm run build\` in flutter_bist/tools/editor`);
+    return 2;
+  }
+  const dts = fs.readFileSync(dtsPath, 'utf8');
+  const libDir = path.dirname(ts.getDefaultLibFilePath({ target: ts.ScriptTarget.ES2022 }));
+  const libFiles: Record<string, string> = {};
+  for (const f of fs.readdirSync(libDir)) if (/^lib\.es(5|20\d\d)(\.[a-z]+)*\.d\.ts$/.test(f) || f === 'lib.decorators.d.ts' || f === 'lib.decorators.legacy.d.ts') libFiles[f] = fs.readFileSync(path.join(libDir, f), 'utf8');
+  const libOrdered = { 'lib.es2022.d.ts': libFiles['lib.es2022.d.ts'], ...libFiles };
+
+  // tsconfig.json for VS Code (import 'flutter_bist' / '@tlt/bist' → this library), created if missing
+  const tsconfig = path.join(srcDir, 'tsconfig.json');
+  if (!fs.existsSync(tsconfig)) {
+    const target = path.join(here, 'bist.d.ts');
+    const rel = path.relative(srcDir, target).split(path.sep).join('/');
+    const cfg = { compilerOptions: { target: 'ES2022', module: 'ESNext', moduleResolution: 'Bundler', strict: true, noEmit: true, skipLibCheck: true, lib: ['ES2022'], types: [], paths: { flutter_bist: [rel], '@tlt/bist': [rel] } }, include: ['*.ts'] };
+    fs.writeFileSync(tsconfig, JSON.stringify(cfg, null, 2) + '\n');
+    console.log(`Created ${path.relative(process.cwd(), tsconfig)}`);
+  }
+
+  const files = fs.readdirSync(srcDir).filter((f: string) => f.endsWith('.ts') && !f.endsWith('.d.ts')).sort();
+  if (!files.length) {
+    console.error(`No .ts files in ${srcDir}`);
+    return 1;
+  }
+  fs.mkdirSync(mjsDir, { recursive: true });
+  const errors: string[] = [];
+  const roots = new Map<string, TestGroupNode>();
+  for (const f of files) {
+    const id = f.replace(/\.ts$/, '');
+    const source = fs.readFileSync(path.join(srcDir, f), 'utf8');
+    const diag = typecheck(ts, source, f, dts, libOrdered);
+    if (diag.length) {
+      errors.push(`${f}:\n  ${diag.map((d) => `Line ${d.line}: ${d.message}`).join('\n  ')}`);
+      continue;
+    }
+    const { code } = transpile(ts, source, f);
+    const mjs = path.join(mjsDir, `${id}.mjs`);
+    fs.writeFileSync(mjs, bundleMjs(id, f, code, bistSource));
+    let out: string;
+    try {
+      out = cp.execFileSync(process.execPath, [mjs], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (e: any) {
+      errors.push(`${f}: ${`${e.stderr ?? e.message}`.trim().split('\n').filter((l: string) => !l.startsWith('    at ')).join('\n')}`);
+      continue;
+    }
+    try {
+      const json = JSON.parse(out.slice(out.indexOf('{')));
+      const e = validate(json, f);
+      if (e.length) errors.push(`${f}:\n  ${e.join('\n  ')}`);
+      else roots.set(json.id, json);
+    } catch (e: any) {
+      errors.push(`${f}: couldn't read JSON (${e.message}) – the file must call printJson(root)`);
+    }
+  }
+  const owner = new Map<string, string>();
+  for (const [file, root] of roots) {
+    for (const id of collectIds(root).ids) {
+      if (owner.has(id) && owner.get(id) !== file) errors.push(`id "${id}" is duplicated in ${file} and ${owner.get(id)}`);
+      owner.set(id, file);
+    }
+  }
+  for (const [file, root] of roots) for (const id of collectIds(root).runTests) if (!owner.has(id)) errors.push(`${file}: runTest("${id}") – no item has this id`);
+  if (errors.length) {
+    console.error(errors.join('\n'));
+    return 1;
+  }
+  fs.mkdirSync(outDir, { recursive: true });
+  for (const f of fs.readdirSync(outDir)) if (f.endsWith('.json')) fs.rmSync(path.join(outDir, f));
+  for (const [id, json] of roots) fs.writeFileSync(path.join(outDir, `${id}.json`), JSON.stringify(toRootJson(json), null, 2) + '\n');
+  console.log(`BIST: ${roots.size} script(s) → ${path.relative(process.cwd(), outDir) || '.'} (.mjs in ${path.relative(process.cwd(), mjsDir)})`);
+  return 0;
+}
+
+// Run the command line when called directly as `node bist.mjs ...` (not when imported by a script / the browser)
+// (compares the file name, not the path: when called through a symlink, import.meta.url is the real path)
+if (typeof process !== 'undefined' && import.meta.url.startsWith('file:') && /[\\/]bist\.m?js$/.test(process.argv?.[1] ?? '')) {
+  main(process.argv.slice(2)).then((code) => process.exit(code));
+}
+</script>
+
+<script>
+'use strict';
+(() => {
+const VERSION_APP = 'v1.0.0';
+const $ = (id) => document.getElementById(id);
+const ts = window.ts;
+const BIST_PATH = '/node_modules/flutter_bist/index.ts';
+const LIB_PATH = '/lib.bist.d.ts';
+const NODE_PATH = '/node.ts';
+// Tool / tree-building functions of bist.ts – not suggested in the steps editor
+const HIDE = new Set(['transpile', 'typecheck', 'bundleMjs', 'validate', 'collectIds', 'toRootJson', 'MINI_LIB', 'SCHEMA', 'SECRET_PATTERN', 'VALUE_PATTERN', 'COMMANDS', 'printJson', 'TestGroup', 'TestUnit', 'TestSequence']);
+const NON_CALL = new Set(['WidgetType', 'LogLevel', 'SwipeDirection']);
+// Positional parameters of each command (same as `FIELDS.main` in bist.ts); the rest go into the trailing object
+const MAIN = {
+  input: ['value'], inputDate: ['value'], inputDateRange: ['start', 'end'], pickFile: ['url'], swipe: ['direction'], wait: ['ms'],
+  runTest: ['script'], loop: ['from', 'to', 'steps'], loopWhile: ['condition', 'steps'], randInt: ['name', 'min', 'max'],
+  randText: ['name', 'minLength', 'maxLength'], getText: ['name'], getLog: ['name', 'tag'], getEnv: ['name', 'key'], log: ['message'],
+  toast: ['message'], confirm: ['message'], ask: ['name', 'message'], nav: ['path'], server: ['name'], expectLog: ['tag'],
+  mockApi: ['api'],
+};
+const NEED_OBJ = new Set(['tap', 'tapLong', 'tapDouble', 'expect', 'notExpect', 'getText']);
+const VERSION = /^(\d+)\.(\d+)\.(\d+)(?:\+(\d+))?$/;
+const ID_RE = /^[A-Za-z0-9_.\-]+$/;
+const icon = (name, extra = '') => `<svg class="i" ${extra}><use href="#i-${name}"/></svg>`;
+
+// ===== State =====
+let root = null, sel = null, fileHandle = null, fileName = '', dirty = false;
+let bistSource = '', bistLib = null, miniLib = '', ls = null;
+let bistNames = [], bistNameSet = new Set();
+let nodeText = '', nodeVersion = 0, prefix = '';
+let stepError = '';        // error writing the steps editor into the selected item
+let editorDiags = [];      // TypeScript errors of the steps editor
+const collapsed = new WeakSet();
+const errNodes = new Map();
+const codeOf = new WeakMap();
+
+let toastTimer = 0;
+function toast(msg, bad = false) {
+  const t = $('toast'); t.textContent = msg; t.className = 'on' + (bad ? ' bad' : '');
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => (t.className = bad ? 'bad' : ''), bad ? 4000 : 2200);
+}
+
+// ===== JSON ↔ steps code =====
+const q = (s) => "'" + String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n') + "'";
+const keyStr = (k) => (/^[A-Za-z_$][\w$]*$/.test(k) ? k : q(k));
+function valueCode(v, ind) {
+  if (Array.isArray(v)) return listCode(v, ind);
+  if (v && typeof v === 'object') return v.cmd ? stepCode(v, ind) : objCode(v, ind);
+  if (typeof v === 'string') return q(v);
+  return JSON.stringify(v);
+}
+function objCode(o, ind) {
+  const ks = Object.keys(o);
+  if (!ks.length) return '{}';
+  const inline = '{ ' + ks.map((k) => `${keyStr(k)}: ${valueCode(o[k], ind)}`).join(', ') + ' }';
+  if (inline.length + ind.length <= 110 && !inline.includes('\n')) return inline;
+  const ind2 = ind + '  ';
+  return '{\n' + ks.map((k) => `${ind2}${keyStr(k)}: ${valueCode(o[k], ind2)},`).join('\n') + '\n' + ind + '}';
+}
+function listCode(list, ind) {
+  if (!list.length) return '[]';
+  const isSteps = list.every((x) => x && typeof x === 'object' && x.cmd);
+  const inline = '[' + list.map((x) => valueCode(x, ind)).join(', ') + ']';
+  if ((!isSteps || list.length === 1) && inline.length + ind.length <= 100 && !inline.includes('\n')) return inline;
+  const ind2 = ind + '  ';
+  return '[\n' + list.map((x) => ind2 + valueCode(x, ind2) + ',').join('\n') + '\n' + ind + ']';
+}
+function stepCode(s, ind = '') {
+  const main = MAIN[s.cmd] ?? [];
+  const args = main.map((k) => valueCode(s[k], ind));
+  const rest = {};
+  for (const [k, v] of Object.entries(s)) if (k !== 'cmd' && !main.includes(k)) rest[k] = v;
+  if (Object.keys(rest).length || NEED_OBJ.has(s.cmd)) args.push(objCode(rest, ind));
+  return `${s.cmd}(${args.join(', ')})`;
+}
+const isGroup = (n) => n && n.type !== 'unit';
+const sections = (n) => (n.type === 'unit' ? ['pre', 'steps', 'after'] : ['pre', 'after']);
+const SECTION_NOTE = {
+  pre: (n) => (n.type === 'unit' ? 'Preconditions – run before the steps' : n.type === 'sequence' ? 'Preconditions – run once before the whole sequence' : 'Preconditions – run before EACH child'),
+  steps: () => 'Test steps',
+  after: (n) => (n.type === 'unit' ? 'Cleanup – run after the steps' : n.type === 'sequence' ? 'Cleanup – run once after the whole sequence' : 'Cleanup – run after EACH child'),
+};
+function nodeCode(n) {
+  return 'export default {\n' + sections(n).map((sec) => `  // ${SECTION_NOTE[sec](n)}\n  ${sec}: ${listCode(n[sec] ?? [], '  ')},\n`).join('') + '};\n';
+}
+// Run the steps editor code with the BIST library → { pre, steps, after }
+function evalNodeCode(code, n) {
+  const body = code.replace(/^(\s*(?:\/\/[^\n]*\n|\/\*[\s\S]*?\*\/)?)*\s*export\s+default\s+/, (m) => m.replace(/export\s+default\s+$/, 'return '));
+  if (!/\breturn\b/.test(body)) throw new Error('Missing `export default { … }`');
+  const r = new Function(...bistNames, body)(...bistNames.map((k) => bistLib[k]));
+  if (!r || typeof r !== 'object' || Array.isArray(r)) throw new Error('`export default` must be an object { pre, steps, after }');
+  const allowed = sections(n);
+  for (const k of Object.keys(r)) if (!allowed.includes(k)) throw new Error(`Unknown block "${k}" – a ${n.type === 'unit' ? 'test' : 'group'} only has ${allowed.join(', ')}`);
+  const out = {};
+  for (const k of allowed) {
+    const v = r[k] ?? [];
+    if (!Array.isArray(v)) throw new Error(`${k} must be a list [ … ]`);
+    v.forEach((s, i) => { if (!s || typeof s !== 'object' || !s.cmd) throw new Error(`${k}: item ${i + 1} is not a BIST command`); });
+    out[k] = v;
+  }
+  return JSON.parse(JSON.stringify(out));
+}
+
+// ===== Tree =====
+function walk(n, fn, num = '', parent = null, depth = 0) {
+  fn(n, num, parent, depth);
+  if (isGroup(n)) n.cases.forEach((c, i) => walk(c, fn, num ? `${num}.${i + 1}` : `${i + 1}`, n, depth + 1));
+}
+const parentOf = (t) => { let p = null; walk(root, (n, _x, par) => { if (n === t) p = par; }); return p; };
+const numberOf = (t) => { let r = ''; walk(root, (n, num) => { if (n === t) r = num; }); return r; };
+const nodeLabel = (n) => (numberOf(n) ? numberOf(n) + '. ' : '') + (n.name || '(untitled)');
+
+// Item has errors: from validating the whole script, or (item being edited) code editor errors / steps that couldn't be written
+const hasError = (n) => errNodes.has(n) || (n === sel && (!!stepError || editorDiags.length > 0));
+function childHasError(g) { let r = false; walk(g, (x) => { if (x !== g && hasError(x)) r = true; }); return r; }
+function renderTree() {
+  const ul = $('tree');
+  ul.innerHTML = '';
+  $('sideEmpty').hidden = !!root;
+  if (!root) return;
+  const hidden = new Set();
+  walk(root, (n, num, parent, depth) => {
+    if (parent && (hidden.has(parent) || collapsed.has(parent))) { hidden.add(n); return; }
+    const li = document.createElement('li');
+    const bad = hasError(n), inner = !bad && isGroup(n) && childHasError(n);
+    li.className = [n === sel ? 'on' : '', n === root ? 'root' : isGroup(n) ? 'grp' : '', bad ? 'err' : ''].join(' ');
+    li.style.paddingLeft = depth * 16 + 4 + 'px';
+    const hasKids = isGroup(n) && n.cases.length;
+    li.innerHTML = `<span class="tw ${hasKids && !collapsed.has(n) ? 'open' : ''}">${hasKids ? icon('chev') : ''}</span>` +
+      `<span class="num"></span><span class="nm"></span><span class="id"></span><span class="badge"></span><span class="fill"></span>` +
+      `<button class="ibtn more" title="Actions">${icon('more')}</button>`;
+    li.querySelector('.num').textContent = num ? num + '.' : '';
+    li.querySelector('.nm').textContent = (n.name || '(untitled)') + (n.type === 'sequence' ? ' ⇢' : '');
+    li.querySelector('.id').textContent = n.id ? `#${n.id}` : '';
+    li.querySelector('.badge').textContent = [n.writes ? '✎' : '', n.manual ? '✋' : '', bad ? '⚠' : ''].join(' ');
+    if (inner) { const d = document.createElement('span'); d.className = 'errdot'; d.title = 'Contains items with errors'; li.querySelector('.badge').after(d); }
+    li.title = [n.type === 'unit' ? 'Test' : n.type === 'sequence' ? 'Sequence (runs in order)' : 'Group', n.writes ? 'writes data' : '', n.manual ? 'manual: ' + n.manual : '', ...(errNodes.get(n) ?? [])].filter(Boolean).join('\n');
+    li.querySelector('.tw').onclick = (e) => { e.stopPropagation(); toggle(n); };
+    li.querySelector('.more').onclick = (e) => {
+      e.stopPropagation();
+      // select() redraws the tree and replaces this … button → take the position first, or the menu lands top-left (a removed button's rect = 0)
+      const r = e.currentTarget.getBoundingClientRect();
+      select(n); openNodeMenu({ getBoundingClientRect: () => r }, n);
+    };
+    li.oncontextmenu = (e) => { e.preventDefault(); e.stopPropagation(); select(n); openMenu({ x: e.clientX, y: e.clientY }, nodeItems(n)); };
+    li.onclick = () => select(n);
+    li.ondblclick = () => toggle(n);
+    ul.appendChild(li);
+    if (n === sel) requestAnimationFrame(() => li.scrollIntoView({ block: 'nearest' }));
+  });
+}
+function toggle(n) { if (!isGroup(n) || !n.cases.length) return; if (collapsed.has(n)) collapsed.delete(n); else collapsed.add(n); renderTree(); }
+
+function uniqueId(base) {
+  const ids = new Set(); walk(root, (n) => n.id && ids.add(n.id));
+  if (!base || !ids.has(base)) return base;
+  let i = 2; while (ids.has(`${base}_${i}`)) i++;
+  return `${base}_${i}`;
+}
+function addNode(type, at = sel ?? root) {
+  if (!root) return;
+  commitEditor();
+  const n = type === 'unit' ? { type: 'unit', name: 'New test', steps: [] } : { type: 'group', name: 'New group', cases: [] };
+  if (isGroup(at)) { at.cases.push(n); collapsed.delete(at); }
+  else { const p = parentOf(at); p.cases.splice(p.cases.indexOf(at) + 1, 0, n); }
+  changed(); select(n);
+  setTimeout(() => { const f = $('p-name'); if (f) { if ($('work').classList.contains('noprops')) toggleProps(); f.focus(); f.select(); } }, 0);
+}
+function canMove(n, d) { const p = n && parentOf(n); if (!p) return false; const j = p.cases.indexOf(n) + d; return j >= 0 && j < p.cases.length; }
+function moveSel(d) {
+  if (!canMove(sel, d)) return;
+  commitEditor();
+  const p = parentOf(sel), i = p.cases.indexOf(sel);
+  p.cases.splice(i, 1); p.cases.splice(i + d, 0, sel);
+  changed(); refreshCrumb();
+}
+const canOut = (n) => { const p = n && parentOf(n); return !!(p && parentOf(p)); };
+function outdentSel() {
+  if (!canOut(sel)) return;
+  commitEditor();
+  const p = parentOf(sel), gp = parentOf(p);
+  p.cases.splice(p.cases.indexOf(sel), 1); gp.cases.splice(gp.cases.indexOf(p) + 1, 0, sel);
+  changed(); refreshCrumb();
+}
+const prevGroup = (n) => { const p = n && parentOf(n); const prev = p && p.cases[p.cases.indexOf(n) - 1]; return isGroup(prev) ? prev : null; };
+function indentSel() {
+  const prev = prevGroup(sel); if (!prev) return;
+  commitEditor();
+  const p = parentOf(sel);
+  p.cases.splice(p.cases.indexOf(sel), 1); prev.cases.push(sel); collapsed.delete(prev);
+  changed(); refreshCrumb();
+}
+function duplicateSel() {
+  const p = sel && parentOf(sel); if (!p) return;
+  commitEditor();
+  const copy = JSON.parse(JSON.stringify(sel));
+  walk(copy, (n) => { if (n.id) n.id = uniqueId(n.id); });
+  copy.name = sel.name + ' (copy)';
+  p.cases.splice(p.cases.indexOf(sel) + 1, 0, copy);
+  changed(); select(copy);
+}
+function deleteSel() {
+  const p = sel && parentOf(sel); if (!p) return;
+  let count = 0; walk(sel, (n) => n.type === 'unit' && count++);
+  if (!confirm(`Delete "${sel.name}"${isGroup(sel) ? ` and the ${count} test(s) inside` : ''}?`)) return;
+  const i = p.cases.indexOf(sel);
+  p.cases.splice(i, 1); sel = null;
+  changed(); select(p.cases[Math.min(i, p.cases.length - 1)] ?? p);
+}
+
+// ===== Claude-style menu =====
+function openMenu(anchor, items) {
+  const m = $('menu');
+  m.innerHTML = '';
+  for (const it of items) {
+    if (it === '-') { m.appendChild(document.createElement('hr')); continue; }
+    const b = document.createElement('button');
+    b.className = it.danger ? 'danger' : '';
+    b.disabled = !!it.disabled;
+    b.innerHTML = (it.icon ? icon(it.icon) : '<span style="width:16px"></span>') + '<span></span>' + (it.key ? `<span class="k">${it.key}</span>` : '');
+    b.children[1].textContent = it.label;
+    b.onclick = () => { closeMenu(); it.run(); };
+    m.appendChild(b);
+  }
+  m.className = 'menu on';
+  const r = anchor.getBoundingClientRect ? anchor.getBoundingClientRect() : { left: anchor.x, right: anchor.x, top: anchor.y, bottom: anchor.y };
+  const w = m.offsetWidth, h = m.offsetHeight;
+  m.style.left = Math.max(6, Math.min(r.left, innerWidth - w - 6)) + 'px';
+  m.style.top = (r.bottom + 4 + h > innerHeight ? Math.max(6, r.top - h - 4) : r.bottom + 4) + 'px';
+}
+function closeMenu() { $('menu').className = 'menu'; }
+document.addEventListener('mousedown', (e) => { if (!e.target.closest('#menu')) closeMenu(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(); });
+
+// Actions on a tree item (… button / right-click on the row)
+function nodeItems(n) {
+  const isRoot = n === root;
+  return [
+    { icon: 'folder', label: isGroup(n) ? 'Add group inside' : 'Add group below', run: () => addNode('group', n) },
+    { icon: 'test', label: isGroup(n) ? 'Add test inside' : 'Add test below', run: () => addNode('unit', n) },
+    '-',
+    { icon: 'edit', label: isRoot ? 'Rename project' : 'Rename', run: () => focusName(n) },
+    { icon: 'copy', label: 'Duplicate', disabled: isRoot, run: duplicateSel },
+    '-',
+    { icon: 'up', label: 'Move up', key: 'Alt+↑', disabled: !canMove(n, -1), run: () => moveSel(-1) },
+    { icon: 'dn', label: 'Move down', key: 'Alt+↓', disabled: !canMove(n, 1), run: () => moveSel(1) },
+    { icon: 'out', label: 'Move out of group', key: 'Alt+←', disabled: !canOut(n), run: outdentSel },
+    { icon: 'in', label: 'Move into group above', key: 'Alt+→', disabled: !prevGroup(n), run: indentSel },
+    '-',
+    { icon: 'trash', label: 'Delete', key: 'Delete', danger: true, disabled: isRoot, run: deleteSel },
+  ];
+}
+function focusName(n) {
+  select(n);
+  if ($('work').classList.contains('noprops')) toggleProps();
+  const f = $('p-name'); f.focus(); f.select();
+}
+function openNodeMenu(anchor, n) { openMenu(anchor, nodeItems(n)); }
+// + button menu (also the right-click menu on empty space in the left panel): project, add item, save, JSON
+function plusItems() {
+  const reopen = lastHandle && (!fileHandle || lastHandle.name !== fileName)
+    ? [{ icon: 'file', label: `Reopen “${lastHandle.name}”`, run: () => reopenFile(lastHandle) }] : [];
+  return [
+    { icon: 'open', label: 'Open project…', key: isMac ? '⌘O' : 'Ctrl+O', run: openFile },
+    ...reopen,
+    { icon: 'plus', label: 'New project…', run: newFile },
+    '-',
+    { icon: 'folder', label: 'New group', disabled: !root, run: () => addNode('group') },
+    { icon: 'test', label: 'New test', disabled: !root, run: () => addNode('unit') },
+    '-',
+    { icon: 'save', label: 'Save', key: isMac ? '⌘S' : 'Ctrl+S', disabled: !root, run: () => save(false) },
+    { icon: 'save', label: 'Save as…', disabled: !root, run: () => save(true) },
+    '-',
+    { icon: 'edit', label: 'Rename project', disabled: !root, run: () => focusName(root) },
+    { icon: 'code', label: 'View JSON for the app', disabled: !root, run: showJsonDlg },
+  ];
+}
+function openPlusMenu() { openMenu($('btnPlus'), plusItems()); }
+
+// ===== Select item =====
+function select(n) {
+  if (!n) return;
+  if (sel !== n && !$('findBar').hidden) setTimeout(() => findRefresh(false), 0);
+  if (sel && sel !== n) commitEditor();
+  sel = n;
+  loadEditor(); renderProps(); renderTree(); renderAnalysis();
+}
+function refreshCrumb() {
+  $('projName').textContent = root ? root.name || root.id || 'Project' : 'No project';
+  $('nodeName').textContent = sel ? (sel !== root ? nodeLabel(sel) : '(root)') : '';
+  $('btnCloseNode').hidden = !sel;
+  document.querySelector('#crumb .sepc').hidden = !sel;
+  $('noNode').hidden = !root || !!sel;
+  $('dirty').className = dirty ? 'on' : '';
+  document.title = root ? `${dirty ? '● ' : ''}${fileName || root.name} · BIST Editor` : 'BIST Editor';
+}
+
+let loading = false;
+function loadEditor() {
+  loading = true;
+  const code = nodeCode(sel);
+  cm.setValue(code); cm.clearHistory(); cm.setOption('readOnly', false);
+  codeOf.set(sel, code);
+  nodeText = code; nodeVersion++;
+  loading = false;
+  stepError = '';
+  refreshCrumb();
+  refreshDiagnostics();
+  const lines = code.split('\n');
+  const at = Math.max(0, lines.findIndex((l) => l.startsWith(sel.type === 'unit' ? '  steps:' : '  pre:')));
+  cm.setCursor({ line: at, ch: lines[at].length });
+}
+
+let commitTimer = 0;
+function commitEditor() {
+  clearTimeout(commitTimer);
+  if (!sel || loading) return true;
+  const code = cm.getValue();
+  if (code === codeOf.get(sel)) { if (stepError) { stepError = ''; renderAnalysis(); renderTree(); } return true; }
+  try {
+    const r = evalNodeCode(code, sel);
+    for (const sec of sections(sel)) {
+      if (sec === 'steps') sel.steps = r.steps;
+      else if (r[sec].length) sel[sec] = r[sec]; else delete sel[sec];
+    }
+    codeOf.set(sel, code);
+    stepError = '';
+    changed(false); checkProps();
+    return true;
+  } catch (e) {
+    stepError = 'Steps not applied: ' + (e.message ?? e);
+    renderAnalysis(); renderTree();
+    return false;
+  }
+}
+
+// ===== Properties =====
+function renderProps() {
+  const f = $('propForm');
+  if (!sel) { f.innerHTML = '<span class="muted">Nothing selected.</span>'; return; }
+  const n = sel, isRoot = n === root;
+  const typeOpts = n.type === 'unit'
+    ? '<option value="unit">Test (TestUnit)</option>'
+    : '<option value="group">Group (TestGroup) – children run independently</option><option value="sequence">Sequence (TestSequence) – runs in order, stops on failure</option>';
+  f.innerHTML = `
+    <label>Type<select id="p-type" ${n.type === 'unit' ? 'disabled' : ''}>${typeOpts}</select></label>
+    <label>${isRoot ? 'Project name' : 'Name'} *<input type="text" id="p-name"></label>
+    <label>Id${isRoot ? ' *' : ''}<input type="text" id="p-id" placeholder="e.g. login.ql – for runTest('…') / BIST_RUN"><span class="field-err" id="e-id"></span></label>
+    <div class="row2">
+      <label>Min version<input type="text" id="p-minVersion" placeholder="1.0.0+10"></label>
+      <label>Max version<input type="text" id="p-maxVersion" placeholder="2.0.0"></label>
+    </div>
+    <span class="field-err" id="e-ver"></span>
+    <label class="chk"><input type="checkbox" id="p-writes"> Writes data (never runs on Production)</label>
+    <label>Manual – why it can't be automated<textarea id="p-manual" rows="2" placeholder="e.g. OS fingerprint / Face ID"></textarea></label>
+    <div id="propInfo"></div>`;
+  $('p-type').value = n.type;
+  for (const k of ['name', 'id', 'minVersion', 'maxVersion', 'manual']) {
+    $(`p-${k}`).value = n[k] ?? '';
+    $(`p-${k}`).oninput = (e) => {
+      const v = e.target.value;
+      if (v.trim()) n[k] = k === 'name' || k === 'manual' ? v : v.trim(); else delete n[k];
+      changed(); checkProps(); refreshCrumb();
+    };
+  }
+  $('p-writes').checked = !!n.writes;
+  $('p-writes').onchange = (e) => { if (e.target.checked) n.writes = true; else delete n.writes; changed(); };
+  $('p-type').onchange = (e) => { commitEditor(); n.type = e.target.value; changed(); loadEditor(); };
+  checkProps();
+}
+const plural = (n, w) => `${n} ${w}${n === 1 ? '' : 's'}`;
+function checkProps() {
+  const n = sel; if (!n || !$('p-id')) return;
+  let idErr = '';
+  if (n.id && !ID_RE.test(n.id)) idErr = 'Only letters, digits, _ . -';
+  else if (n.id) { let c = 0; walk(root, (x) => x.id === n.id && c++); if (c > 1) idErr = 'Id already used by another item'; }
+  else if (n === root) idErr = 'The project (root) needs an id';
+  $('e-id').textContent = idErr;
+  $('p-id').classList.toggle('bad-input', !!idErr);
+  const badMin = !!(n.minVersion && !VERSION.test(n.minVersion)), badMax = !!(n.maxVersion && !VERSION.test(n.maxVersion));
+  $('e-ver').textContent = badMin || badMax ? 'Version must look like 1.0.0 or 1.0.0+10' : '';
+  $('p-minVersion').classList.toggle('bad-input', badMin);
+  $('p-maxVersion').classList.toggle('bad-input', badMax);
+  $('p-name').classList.toggle('bad-input', !n.name);
+  let units = 0, steps = 0;
+  walk(n, (x) => { if (x.type === 'unit') { units++; steps += (x.steps ?? []).length; } });
+  $('propInfo').textContent = n.type === 'unit'
+    ? plural((n.steps ?? []).length, 'step') + ((n.pre ?? []).length ? ' · ' + plural(n.pre.length, 'precondition') : '') + ((n.after ?? []).length ? ' · ' + plural(n.after.length, 'cleanup step') : '')
+    : plural(units, 'test') + ' · ' + plural(steps, 'step');
+}
+function toggleProps() {
+  const w = $('work'); w.classList.toggle('noprops');
+  const on = !w.classList.contains('noprops');
+  $('btnProps').classList.toggle('on', on);
+  try { localStorage.setItem('bist-props', on ? '1' : '0'); } catch { /* ignore */ }
+  cm.refresh(); placePropsSplit();
+}
+
+// ===== Analysis =====
+function validateAll() {
+  errNodes.clear();
+  const list = [];
+  if (!root) return list;
+  const ids = new Set(); walk(root, (n) => n.id && ids.add(n.id));
+  const byNum = new Map(); walk(root, (n, num) => byNum.set(num, n));
+  for (const m of bistLib.validate(toJson())) {
+    const mm = /^([\d.]+) /.exec(m);
+    // Strip the leading item number and name (already in the location column): `1.3 "Name" steps[1]: …` → `steps[1]: …`
+    const msg = m.replace(/^(?:[\d.]+|Root) (?:"[^"]*")?\s*/, '').replace(/^:\s*/, '');
+    list.push({ level: 'bad', message: msg, node: (mm && byNum.get(mm[1])) || root });
+  }
+  walk(root, (n) => {
+    const visit = (s) => {
+      if (s.cmd === 'runTest' && !ids.has(s.script)) list.push({ level: 'warn', message: `runTest('${s.script}') – id not in this file (must exist in another script loaded by the app)`, node: n });
+      (s.onError ?? []).forEach(visit); (s.steps ?? []).forEach(visit); if (s.condition) visit(s.condition);
+    };
+    [...(n.pre ?? []), ...(n.after ?? []), ...(n.steps ?? [])].forEach(visit);
+  });
+  for (const e of list) if (e.level === 'bad') errNodes.set(e.node, [...(errNodes.get(e.node) ?? []), e.message]);
+  return list;
+}
+let validation = [];
+function renderAnalysis() {
+  const ul = $('anaList');
+  ul.innerHTML = '';
+  if (!root) { $('anaSum').textContent = ''; return; }
+  const items = [];
+  if (stepError) items.push({ level: 'bad', where: sel ? (numberOf(sel) || 'root') : '', message: stepError, node: sel });
+  for (const d of editorDiags) items.push({ level: 'bad', where: `line ${d.line + 1}`, message: d.message, line: d.line, ch: d.ch });
+  for (const e of validation) items.push({ level: e.level, where: numberOf(e.node) || 'root', message: e.message, node: e.node });
+  const bad = items.filter((i) => i.level === 'bad').length, warn = items.length - bad;
+  $('anaSum').innerHTML = bad || warn
+    ? `<span style="color:var(--err)">${bad} error${bad === 1 ? '' : 's'}</span> · <span style="color:var(--warn)">${warn} warning${warn === 1 ? '' : 's'}</span>${bad ? ' – the app skips files with errors' : ''}`
+    : '<span style="color:var(--ok)">Valid – ready for the app</span>';
+  if (!items.length) { ul.innerHTML = '<li class="ok"><span class="lv">✓</span><span>No problems.</span></li>'; return; }
+  for (const it of items) {
+    const li = document.createElement('li');
+    li.className = it.level;
+    li.innerHTML = `<span class="lv">${it.level === 'bad' ? '✗' : '⚠'}</span><span class="where"></span><span></span>`;
+    li.children[1].textContent = it.where;
+    li.children[2].textContent = it.message;
+    li.onclick = () => {
+      if (it.line != null) { cm.focus(); cm.setCursor({ line: it.line, ch: it.ch }); }
+      else if (it.node && it.node !== sel) select(it.node);
+      else cm.focus();
+    };
+    ul.appendChild(li);
+  }
+}
+function revalidate() { validation = validateAll(); renderTree(); renderAnalysis(); }
+
+// ===== File .bist =====
+function toJson() { const { schema, ...rest } = root; return JSON.parse(JSON.stringify({ schema: schema ?? bistLib.SCHEMA, ...rest })); }
+const toMini = () => JSON.stringify(toJson());
+function changed(redraw = true) {
+  dirty = true; refreshCrumb();
+  clearTimeout(changed.t); changed.t = setTimeout(revalidate, 250);
+  scheduleRecord();
+  if (redraw) renderTree();
+}
+
+// ===== Project history (Undo / Redo): JSON snapshot after each change (changes within 0.6 seconds are merged) =====
+let history = [], hIndex = -1, restoring = false, recordTimer = 0;
+const snapshot = () => ({ json: JSON.stringify(toJson()), sel: sel ? numberOf(sel) : '' });
+function resetHistory() { clearTimeout(recordTimer); history = [snapshot()]; hIndex = 0; updateUndoButtons(); }
+function scheduleRecord() { if (restoring) return; clearTimeout(recordTimer); recordTimer = setTimeout(record, 600); }
+function record() {
+  clearTimeout(recordTimer);
+  if (!root || restoring) return;
+  const s = snapshot();
+  if (history[hIndex] && history[hIndex].json === s.json) { history[hIndex].sel = s.sel; return; }
+  history = history.slice(0, hIndex + 1);
+  history.push(s);
+  if (history.length > 200) history.shift();
+  hIndex = history.length - 1;
+  updateUndoButtons();
+}
+function updateUndoButtons() {
+  $('btnUndo').disabled = !root || hIndex <= 0;
+  $('btnRedo').disabled = !root || hIndex >= history.length - 1;
+}
+function nodeByNumber(num) { let r = root; if (num) walk(root, (n, x) => { if (x === num) r = n; }); return r; }
+function goHistory(d) {
+  if (!root) return;
+  commitEditor();
+  record(); // record the pending change before going back / forward
+  const j = hIndex + d;
+  if (j < 0 || j >= history.length) return;
+  const keep = sel ? numberOf(sel) : '';
+  hIndex = j;
+  restoring = true;
+  root = JSON.parse(history[j].json);
+  sel = null;
+  select(nodeByNumber(d < 0 ? history[j + 1].sel || keep : history[j].sel || keep));
+  restoring = false;
+  dirty = true; refreshCrumb(); revalidate(); updateUndoButtons();
+  toast(d < 0 ? 'Undone' : 'Redone');
+}
+const undo = () => goHistory(-1), redo = () => goHistory(1);
+function openRoot(json, name, handle) {
+  if (!json || typeof json !== 'object' || (json.type !== 'group' && json.type !== 'sequence')) throw new Error('Not a BIST script (root must be a TestGroup / TestSequence)');
+  if (json.schema != null && json.schema !== bistLib.SCHEMA) toast(`File uses schema ${json.schema}, editor uses schema ${bistLib.SCHEMA} – review before saving.`, true);
+  root = json; root.schema = bistLib.SCHEMA;
+  fileHandle = handle ?? null; fileName = name; dirty = false;
+  $('welcome').hidden = true; $('btnJson').disabled = false;
+  sel = null; select(root); revalidate();
+  resetHistory();
+}
+let lastHandle = null;
+async function openFile() {
+  if (!confirmDiscard()) return;
+  if (window.showOpenFilePicker) {
+    let h;
+    try { [h] = await window.showOpenFilePicker({ id: 'bist', types: [{ description: 'BIST script', accept: { 'application/json': ['.bist', '.json'] } }] }); } catch { return; }
+    const file = await h.getFile();
+    try { openRoot(JSON.parse(await file.text()), file.name, h); lastHandle = h; await idb.set('file', h); toast(`Opened ${file.name}`); }
+    catch (e) { alert(`Couldn't open ${file.name}: ${e.message}`); }
+    return;
+  }
+  $('filePick').click();
+}
+$('filePick').onchange = async (e) => {
+  const file = e.target.files[0]; if (!file) return;
+  try { openRoot(JSON.parse(await file.text()), file.name, null); toast(`Opened ${file.name} – this browser can't overwrite files, Save will download a copy`); }
+  catch (er) { alert(`Couldn't open ${file.name}: ${er.message}`); }
+  e.target.value = '';
+};
+async function reopenFile(h) {
+  if (!confirmDiscard()) return;
+  try { if ((await h.requestPermission({ mode: 'readwrite' })) !== 'granted') return; } catch { return openFile(); }
+  try { const file = await h.getFile(); openRoot(JSON.parse(await file.text()), file.name, h); toast(`Opened ${file.name}`); }
+  catch (e) { alert(`Couldn't reopen: ${e.message}`); }
+}
+function newFile() {
+  if (!confirmDiscard()) return;
+  const name = (prompt('Project name (e.g. My App):', '') ?? '').trim();
+  if (!name) return;
+  const id = name.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'project';
+  openRoot({ schema: bistLib.SCHEMA, type: 'group', id, name, cases: [{ type: 'unit', id: `${id}.1`, name: 'Test 1', steps: [{ cmd: 'expect', text: 'Hello' }] }] }, `${id}.bist`, null);
+  dirty = true; refreshCrumb();
+}
+let saving = false;
+async function save(as = false) {
+  if (!root || saving) return;
+  saving = true;
+  try { await saveNow(as); } finally { saving = false; }
+}
+async function saveNow(as) {
+  if (!commitEditor() && !confirm('The steps editor has errors – save with the previous steps of that item?')) return;
+  const bad = validateAll().filter((e) => e.level === 'bad').length;
+  if (bad && !confirm(`The script has ${bad} error(s) – the app will skip this file. Save anyway?`)) return;
+  const text = toMini();
+  const suggested = (fileName || `${root.id}.bist`).replace(/\.json$/, '.bist');
+  if ((as || !fileHandle) && window.showSaveFilePicker) {
+    try {
+      fileHandle = await window.showSaveFilePicker({ id: 'bist', suggestedName: suggested, types: [{ description: 'BIST script', accept: { 'application/json': ['.bist'] } }] });
+      fileName = fileHandle.name; lastHandle = fileHandle; await idb.set('file', fileHandle);
+    } catch { return; }
+  }
+  if (fileHandle) {
+    try { const w = await fileHandle.createWritable(); await w.write(text); await w.close(); }
+    catch (e) { toast(`Couldn't write ${fileName}: ${e.message}`, true); return; }
+  } else {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], { type: 'application/json' }));
+    a.download = suggested; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+  }
+  dirty = false; refreshCrumb();
+  toast(`Saved ${fileName || suggested} · ${(new Blob([text]).size / 1024).toFixed(1)} KB${bad ? ` · ${bad} error(s)` : ''}`, !!bad);
+}
+function confirmDiscard() { commitEditor(); return !dirty || confirm('The open project has unsaved changes – discard them?'); }
+window.addEventListener('beforeunload', (e) => { commitEditor(); if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+const idb = {
+  open: () => new Promise((ok, no) => { const r = indexedDB.open('bist-editor', 2); r.onupgradeneeded = () => { if (!r.result.objectStoreNames.contains('kv')) r.result.createObjectStore('kv'); }; r.onsuccess = () => ok(r.result); r.onerror = () => no(r.error); }),
+  async get(k) { try { const db = await this.open(); return await new Promise((ok) => { const r = db.transaction('kv').objectStore('kv').get(k); r.onsuccess = () => ok(r.result); r.onerror = () => ok(undefined); }); } catch { return undefined; } },
+  async set(k, v) { try { const db = await this.open(); db.transaction('kv', 'readwrite').objectStore('kv').put(v, k); } catch { /* ignore */ } },
+};
+
+// ===== Steps editor (CodeMirror) =====
+const cm = CodeMirror.fromTextArea($('editor'), {
+  mode: 'javascript', lineNumbers: true, matchBrackets: true, autoCloseBrackets: true, styleActiveLine: true,
+  indentUnit: 2, tabSize: 2, indentWithTabs: false, readOnly: 'nocursor',
+  gutters: ['gutter-err', 'CodeMirror-linenumbers', 'CodeMirror-foldgutter'],
+  foldGutter: true,
+  foldOptions: { widget: '⋯', minFoldSize: 1 },
+  extraKeys: {
+    'Ctrl-Shift-[': (c) => c.foldCode(c.getCursor(), null, 'fold'), 'Cmd-Alt-[': (c) => c.foldCode(c.getCursor(), null, 'fold'),
+    'Ctrl-Shift-]': (c) => c.foldCode(c.getCursor(), null, 'unfold'), 'Cmd-Alt-]': (c) => c.foldCode(c.getCursor(), null, 'unfold'),
+    'Ctrl-Space': () => showHint(true), 'Cmd-Space': () => showHint(true),
+    'Ctrl-F': () => openFind(false), 'Cmd-F': () => openFind(false),
+    'Ctrl-R': () => openFind(true), 'Cmd-R': () => openFind(true), 'Ctrl-H': () => openFind(true), 'Cmd-Alt-F': () => openFind(true),
+    F3: () => findMove(1), 'Shift-F3': () => findMove(-1), 'Cmd-G': () => findMove(1), 'Shift-Cmd-G': () => findMove(-1),
+    Esc: () => { if ($('findBar').hidden) return CodeMirror.Pass; closeFind(); },
+    'Ctrl-/': 'toggleComment', 'Cmd-/': 'toggleComment',
+    'Shift-Alt-F': () => formatEditor(), 'Ctrl-Alt-L': () => formatEditor(), 'Cmd-Alt-L': () => formatEditor(),
+    'Ctrl-D': (c) => duplicateLine(c), 'Cmd-D': (c) => duplicateLine(c),
+    'Shift-Ctrl-F': () => openSearch(), 'Shift-Cmd-F': () => openSearch(),
+    Tab: (c) => (c.somethingSelected() ? c.indentSelection('add') : c.replaceSelection('  ')),
+    'Shift-Tab': (c) => c.indentSelection('subtract'),
+  },
+});
+cm.addOverlay({
+  token(stream) {
+    if (stream.sol() && stream.match(/^\s*(pre|steps|after)(?=\s*:)/)) return 'section';
+    if (stream.match(/^\{\{[^}]*\}\}/)) return 'tvar';
+    if (stream.match(/^[A-Za-z_$][\w$]*/)) return bistNameSet.has(stream.current()) && stream.peek() === '(' ? 'bist' : null;
+    stream.next();
+    return null;
+  },
+});
+// ===== Close the open item's code (× on the top bar) =====
+function closeNode() {
+  if (!sel) return;
+  if (!commitEditor() && !confirm('The steps have errors and were not applied – close anyway (changes are lost)?')) return;
+  sel = null;
+  loading = true; cm.setValue(''); cm.clearHistory(); loading = false;
+  cm.setOption('readOnly', 'nocursor');
+  nodeText = ''; nodeVersion++;
+  stepError = ''; editorDiags = [];
+  marks.forEach((m) => m.clear()); marks = []; cm.clearGutter('gutter-err');
+  closeFind();
+  $('sig').textContent = 'Type for suggestions (Ctrl+Space) · hover a command for docs · Ctrl+Alt+L to format · Ctrl+D duplicate line · Ctrl+Shift+F find in project · Ctrl+S to save';
+  renderProps(); renderTree(); renderAnalysis(); refreshCrumb();
+}
+
+// Ctrl+D: duplicate the line at the cursor, or the selection (like Android Studio)
+function duplicateLine(c) {
+  if (!sel) return;
+  c.operation(() => {
+    const ranges = c.listSelections().slice().reverse();
+    for (const r of ranges) {
+      const from = CodeMirror.cmpPos(r.anchor, r.head) <= 0 ? r.anchor : r.head;
+      const to = from === r.anchor ? r.head : r.anchor;
+      if (CodeMirror.cmpPos(from, to) === 0) {
+        const line = c.getLine(from.line);
+        c.replaceRange(line + '\n', CodeMirror.Pos(from.line, 0));
+        c.setCursor(CodeMirror.Pos(from.line + 1, from.ch));
+      } else {
+        const text = c.getRange(from, to);
+        c.replaceRange(text, to);
+        const end = c.getDoc().posFromIndex(c.getDoc().indexFromPos(to) + text.length);
+        c.setSelection(to, end);
+      }
+    }
+  });
+}
+
+// ===== Search the whole project (Ctrl+Shift+F, like Android Studio's "Find in Files") =====
+const sOpt = { case: false, word: false, regex: false };
+function makeRegex(q, opt, input) {
+  if (!q) return null;
+  let src = opt.regex ? q : q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (opt.word) src = `\\b(?:${src})\\b`;
+  try { input?.classList.remove('bad'); return new RegExp(src, 'g' + (opt.case ? '' : 'i')); }
+  catch { input?.classList.add('bad'); return null; }
+}
+let searchResults = [];
+function runSearch() {
+  const q = $('sInput').value;
+  const re = makeRegex(q, sOpt, $('sInput'));
+  const ul = $('sList');
+  ul.innerHTML = '';
+  searchResults = [];
+  if (!re || !root) { $('sCount').textContent = ''; return; }
+  commitEditor();
+  let groups = 0;
+  walk(root, (n, num) => {
+    const hits = [];
+    for (const [label, v] of [['name', n.name], ['id', n.id], ['manual', n.manual]]) {
+      if (typeof v === 'string') { re.lastIndex = 0; const m = re.exec(v); if (m && m[0]) hits.push({ kind: label, text: v, ch: m.index, len: m[0].length }); }
+    }
+    const code = n === sel ? cm.getValue() : nodeCode(n);
+    code.split('\n').forEach((l, i) => {
+      re.lastIndex = 0;
+      let m;
+      while ((m = re.exec(l)) && hits.length < 500) {
+        if (!m[0]) { re.lastIndex++; continue; }
+        hits.push({ kind: 'code', line: i, ch: m.index, len: m[0].length, text: l });
+      }
+    });
+    if (!hits.length) return;
+    groups++;
+    const head = document.createElement('li');
+    head.className = 'sh';
+    head.innerHTML = '<span class="num"></span><b></b><span class="id"></span><span class="c"></span>';
+    head.children[0].textContent = num ? num + '.' : '';
+    head.children[1].textContent = n.name || '(untitled)';
+    head.children[2].textContent = n.id ? '#' + n.id : '';
+    head.children[3].textContent = hits.length;
+    ul.appendChild(head);
+    for (const h of hits) {
+      const li = document.createElement('li');
+      li.className = 'sr';
+      li.innerHTML = '<span class="ln"></span><span class="tx"></span>';
+      li.children[0].textContent = h.kind === 'code' ? h.line + 1 : h.kind;
+      const tx = li.children[1];
+      const start = Math.max(0, h.ch - 40);
+      tx.append((start ? '…' : '') + h.text.slice(start, h.ch).trimStart());
+      const mk = document.createElement('mark'); mk.textContent = h.text.slice(h.ch, h.ch + h.len); tx.append(mk);
+      tx.append(h.text.slice(h.ch + h.len, h.ch + h.len + 80));
+      const r = { n, ...h };
+      searchResults.push(r);
+      li.onclick = () => openResult(r);
+      ul.appendChild(li);
+    }
+  });
+  $('sCount').textContent = searchResults.length ? `${searchResults.length} match${searchResults.length === 1 ? '' : 'es'} in ${groups} item${groups === 1 ? '' : 's'}` : 'No matches';
+  $('sCount').className = searchResults.length ? 'muted' : 'none';
+}
+function openResult(r) {
+  $('searchDlg').close();
+  select(r.n);
+  if (r.kind !== 'code') { if ($('work').classList.contains('noprops')) toggleProps(); const f = $(`p-${r.kind}`); if (f) { f.focus(); f.setSelectionRange(r.ch, r.ch + r.len); } return; }
+  // Open the find bar with the same query and jump to the match
+  $('findInput').value = $('sInput').value;
+  for (const [id, k] of [['fCase', 'case'], ['fWord', 'word'], ['fRegex', 'regex']]) { find.opt[k] = sOpt[k]; $(id).classList.toggle('on', sOpt[k]); }
+  const from = CodeMirror.Pos(r.line, r.ch), to = CodeMirror.Pos(r.line, r.ch + r.len);
+  cm.setSelection(from, to);
+  $('findBar').hidden = false;
+  findRefresh(true);
+  cm.scrollIntoView({ from, to }, 80);
+  cm.focus();
+}
+function openSearch() {
+  if (!root) return;
+  const s0 = sel ? cm.getSelection() : '';
+  if (s0 && !s0.includes('\n')) $('sInput').value = s0;
+  if (!$('searchDlg').open) $('searchDlg').showModal();
+  $('sInput').focus(); $('sInput').select();
+  runSearch();
+}
+let sTimer = 0;
+$('sInput').addEventListener('input', () => { clearTimeout(sTimer); sTimer = setTimeout(runSearch, 150); });
+$('sInput').addEventListener('keydown', (e) => { if (e.key === 'Enter' && searchResults[0]) { e.preventDefault(); openResult(searchResults[0]); } });
+for (const [id, k] of [['sCase', 'case'], ['sWord', 'word'], ['sRegex', 'regex']]) {
+  $(id).onclick = () => { sOpt[k] = !sOpt[k]; $(id).classList.toggle('on', sOpt[k]); runSearch(); $('sInput').focus(); };
+}
+$('sClose').onclick = () => $('searchDlg').close();
+// Remember the search dialog size after resizing
+try { const z = JSON.parse(localStorage.getItem('bist-sdlg') || 'null'); if (z) { document.documentElement.style.setProperty('--sdlg-w', z.w + 'px'); document.documentElement.style.setProperty('--sdlg-h', z.h + 'px'); } } catch { /* ignore */ }
+new ResizeObserver(() => { const d = $('searchDlg'); if (!d.open) return; try { localStorage.setItem('bist-sdlg', JSON.stringify({ w: d.offsetWidth, h: d.offsetHeight })); } catch { /* ignore */ } }).observe($('searchDlg'));
+$('searchDlg').addEventListener('click', (e) => { if (e.target === $('searchDlg')) $('searchDlg').close(); });
+
+// ===== Find / replace in the code editor (Android Studio style) =====
+const find = { matches: [], cur: -1, marks: [], opt: { case: false, word: false, regex: false } };
+function findQuery() {
+  const q = $('findInput').value;
+  if (!q) return null;
+  let src = find.opt.regex ? q : q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  if (find.opt.word) src = `\\b(?:${src})\\b`;
+  try { $('findInput').classList.remove('bad'); return new RegExp(src, 'g' + (find.opt.case ? '' : 'i') + 'm'); }
+  catch { $('findInput').classList.add('bad'); return null; }
+}
+function findRefresh(keepPos = true) {
+  find.marks.forEach((m) => m.clear()); find.marks = []; find.matches = [];
+  const re = findQuery();
+  if (re && sel) {
+    const text = cm.getValue(), doc = cm.getDoc();
+    let m;
+    while ((m = re.exec(text)) && find.matches.length < 5000) {
+      if (m[0] === '') { re.lastIndex++; continue; }
+      const from = doc.posFromIndex(m.index), to = doc.posFromIndex(m.index + m[0].length);
+      find.matches.push({ from, to, text: m[0] });
+    }
+    cm.operation(() => { for (const x of find.matches) find.marks.push(cm.markText(x.from, x.to, { className: 'cm-find' })); });
+  }
+  // Current match: the first match from the cursor
+  const c = keepPos ? cm.getCursor('from') : CodeMirror.Pos(0, 0);
+  find.cur = find.matches.findIndex((x) => CodeMirror.cmpPos(x.from, c) >= 0);
+  if (find.cur < 0 && find.matches.length) find.cur = 0;
+  findShowCount();
+  findHighlightCur();
+}
+function findShowCount() {
+  const el = $('findCount');
+  const q = $('findInput').value;
+  el.className = q && !find.matches.length ? 'none' : '';
+  el.textContent = !q ? '' : !find.matches.length ? '0 results' : `${find.cur + 1}/${find.matches.length}`;
+  $('replOne').disabled = $('replAll').disabled = !find.matches.length;
+}
+let curMark = null;
+function findHighlightCur() {
+  if (curMark) { curMark.clear(); curMark = null; }
+  const x = find.matches[find.cur];
+  if (!x) return;
+  curMark = cm.markText(x.from, x.to, { className: 'cm-find-cur' });
+  cm.scrollIntoView({ from: x.from, to: x.to }, 60);
+}
+function findMove(d) {
+  if ($('findBar').hidden) return openFind(false);
+  if (!find.matches.length) return;
+  find.cur = (find.cur + d + find.matches.length) % find.matches.length;
+  const x = find.matches[find.cur];
+  cm.setSelection(x.from, x.to);
+  findShowCount(); findHighlightCur();
+}
+function replaceText(match) {
+  const rep = $('replInput').value;
+  if (!find.opt.regex) return rep;
+  const re = findQuery(); re.lastIndex = 0;
+  return match.replace(new RegExp(re.source, re.flags.replace('g', '')), rep);
+}
+function replaceOne() {
+  const x = find.matches[find.cur];
+  if (!x) return;
+  cm.replaceRange(replaceText(x.text), x.from, x.to, '+replace');
+  const at = cm.getDoc().indexFromPos(x.from) + replaceText(x.text).length;
+  cm.setCursor(cm.getDoc().posFromIndex(at));
+  findRefresh(true);
+  if (find.matches[find.cur]) cm.setSelection(find.matches[find.cur].from, find.matches[find.cur].to);
+}
+function replaceAll() {
+  if (!find.matches.length) return;
+  const n = find.matches.length;
+  cm.operation(() => { for (const x of [...find.matches].reverse()) cm.replaceRange(replaceText(x.text), x.from, x.to, '+replace'); });
+  findRefresh(true);
+  toast(`Replaced ${n} occurrence${n === 1 ? '' : 's'}`);
+}
+function openFind(withReplace) {
+  if (!sel) return;
+  const bar = $('findBar');
+  bar.hidden = false;
+  if (withReplace) bar.classList.add('repl');
+  const s0 = cm.getSelection();
+  if (s0 && !s0.includes('\n')) $('findInput').value = s0;
+  findRefresh(true);
+  const inp = withReplace && $('findInput').value ? $('replInput') : $('findInput');
+  inp.focus(); inp.select();
+  cm.refresh();
+}
+function closeFind() {
+  const bar = $('findBar');
+  if (bar.hidden) return;
+  bar.hidden = true; bar.classList.remove('repl');
+  find.marks.forEach((m) => m.clear()); find.marks = []; find.matches = [];
+  if (curMark) { curMark.clear(); curMark = null; }
+  cm.refresh(); if (sel) cm.focus();
+}
+$('findInput').addEventListener('input', () => findRefresh(true));
+$('findInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); findMove(e.shiftKey ? -1 : 1); }
+  else if (e.key === 'Escape') { e.preventDefault(); closeFind(); }
+  else if (e.key === 'F3') { e.preventDefault(); findMove(e.shiftKey ? -1 : 1); }
+  else if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'r') { e.preventDefault(); $('findBar').classList.add('repl'); $('replInput').focus(); }
+});
+$('replInput').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && e.altKey) { e.preventDefault(); replaceAll(); }
+  else if (e.key === 'Enter') { e.preventDefault(); replaceOne(); }
+  else if (e.key === 'Escape') { e.preventDefault(); closeFind(); }
+});
+for (const [id, k] of [['fCase', 'case'], ['fWord', 'word'], ['fRegex', 'regex']]) {
+  $(id).onclick = () => { find.opt[k] = !find.opt[k]; $(id).classList.toggle('on', find.opt[k]); findRefresh(true); $('findInput').focus(); };
+}
+$('findNext').onclick = () => findMove(1);
+$('findPrev').onclick = () => findMove(-1);
+$('findClose').onclick = closeFind;
+$('findToggle').onclick = () => { $('findBar').classList.toggle('repl'); cm.refresh(); };
+$('replOne').onclick = replaceOne;
+$('replAll').onclick = replaceAll;
+$('btnCloseNode').onclick = closeNode;
+let findTimer = 0;
+cm.on('changes', () => { if (!$('findBar').hidden) { clearTimeout(findTimer); findTimer = setTimeout(() => findRefresh(true), 200); } });
+
+cm.on('changes', () => {
+  if (loading || !sel) return;
+  nodeText = cm.getValue(); nodeVersion++;
+  scheduleDiagnostics();
+  clearTimeout(commitTimer); commitTimer = setTimeout(commitEditor, 500);
+});
+cm.on('cursorActivity', () => scheduleSignature());
+
+// Right-click menu in the code editor
+const isMac = /Mac/.test(navigator.platform);
+const mod = (k) => (isMac ? '⌘' : 'Ctrl+') + k;
+function foldAllAt(level) {
+  // level 1: fold the pre / steps / after blocks; 0: unfold all
+  cm.operation(() => {
+    for (let l = cm.firstLine(); l <= cm.lastLine(); l++) {
+      if (level === 0) cm.foldCode(CodeMirror.Pos(l, 0), null, 'unfold');
+      else if (/^\s{2}(pre|steps|after):\s*\[\s*$/.test(cm.getLine(l))) cm.foldCode(CodeMirror.Pos(l, 0), null, 'fold');
+    }
+  });
+}
+cm.getWrapperElement().addEventListener('contextmenu', (e) => {
+  if (!sel) return;
+  e.preventDefault();
+  const pos = cm.coordsChar({ left: e.clientX, top: e.clientY }, 'window');
+  if (!cm.somethingSelected()) cm.setCursor(pos);
+  const hasSel = cm.somethingSelected();
+  cm.focus();
+  openMenu({ x: e.clientX, y: e.clientY }, [
+    { icon: 'search', label: 'Find…', key: mod('F'), run: () => openFind(false) },
+    { label: 'Find in project…', key: isMac ? '⇧⌘F' : 'Ctrl+Shift+F', run: () => openSearch() },
+    { label: 'Replace…', key: mod('R'), run: () => openFind(true) },
+    '-',
+    { icon: 'fmt', label: 'Format code', key: isMac ? '⌥⌘L' : 'Ctrl+Alt+L', run: formatEditor },
+    { label: 'Duplicate line', key: mod('D'), run: () => duplicateLine(cm) },
+    { icon: 'code', label: 'Toggle comment', key: mod('/'), run: () => cm.execCommand('toggleComment') },
+    '-',
+    { label: 'Undo', key: mod('Z'), disabled: !cm.historySize().undo, run: () => cm.undo() },
+    { label: 'Redo', key: isMac ? '⇧⌘Z' : 'Ctrl+Y', disabled: !cm.historySize().redo, run: () => cm.redo() },
+    '-',
+    { label: 'Cut', key: mod('X'), disabled: !hasSel, run: async () => { await clip(cm.getSelection()); cm.replaceSelection(''); } },
+    { icon: 'copy', label: 'Copy', key: mod('C'), disabled: !hasSel, run: () => clip(cm.getSelection()) },
+    { label: 'Paste', key: mod('V'), run: paste },
+    { label: 'Select all', key: mod('A'), run: () => { cm.focus(); cm.execCommand('selectAll'); } },
+    '-',
+    { icon: 'chev', label: 'Fold block at cursor', key: isMac ? '⌥⌘[' : 'Ctrl+Shift+[', run: () => cm.foldCode(cm.getCursor(), null, 'fold') },
+    { label: 'Fold pre / steps / after', run: () => foldAllAt(1) },
+    { label: 'Unfold all', run: () => foldAllAt(0) },
+  ]);
+});
+async function clip(text) {
+  try { await navigator.clipboard.writeText(text); } catch { document.execCommand('copy'); }
+  cm.focus();
+}
+async function paste() {
+  cm.focus();
+  try { cm.replaceSelection(await navigator.clipboard.readText()); }
+  catch { toast(`The browser blocked clipboard access – use ${mod('V')}`, true); }
+}
+function formatEditor() {
+  if (!sel || !commitEditor()) return;
+  const cur = cm.getCursor();
+  loading = true; cm.setValue(nodeCode(sel)); loading = false;
+  nodeText = cm.getValue(); nodeVersion++; codeOf.set(sel, nodeText);
+  cm.setCursor(cur); refreshDiagnostics(); toast('Formatted');
+}
+
+// ===== TypeScript Language Service for the steps editor =====
+function readVirtual(v) {
+  if (v === BIST_PATH) return bistSource;
+  if (v === LIB_PATH) return miniLib;
+  if (v === NODE_PATH) return prefix + nodeText;
+  return undefined;
+}
+function createLanguageService() {
+  const opts = { allowJs: true, noLib: true, strict: true, noImplicitAny: false, noEmit: true, skipLibCheck: true, types: [], target: ts.ScriptTarget.ES5, module: ts.ModuleKind.ESNext, moduleResolution: ts.ModuleResolutionKind.Node10 };
+  const host = {
+    getScriptFileNames: () => [LIB_PATH, NODE_PATH],
+    getScriptVersion: (v) => (v === NODE_PATH ? String(nodeVersion) : '1'),
+    getScriptSnapshot: (v) => { const t = readVirtual(v); return t == null ? undefined : ts.ScriptSnapshot.fromString(t); },
+    getCurrentDirectory: () => '/', getCompilationSettings: () => opts, getDefaultLibFileName: () => LIB_PATH,
+    fileExists: (v) => readVirtual(v) != null, readFile: readVirtual, readDirectory: () => [], directoryExists: () => true, getDirectories: () => [],
+    resolveModuleNames: (names) => names.map((n) => (n === 'flutter_bist' || n === '@tlt/bist' ? { resolvedFileName: BIST_PATH, extension: ts.Extension.Ts, isExternalLibraryImport: false } : undefined)),
+    useCaseSensitiveFileNames: () => true,
+  };
+  return ts.createLanguageService(host, ts.createDocumentRegistry());
+}
+const plain = (parts) => (parts ?? []).map((p) => p.text).join('');
+const toVirtual = (pos) => prefix.length + cm.getDoc().indexFromPos(pos);
+const fromVirtual = (off) => cm.getDoc().posFromIndex(Math.max(0, off - prefix.length));
+
+let diagTimer = 0, marks = [];
+function scheduleDiagnostics() { clearTimeout(diagTimer); diagTimer = setTimeout(refreshDiagnostics, 300); }
+function refreshDiagnostics() {
+  if (!ls || !sel) return;
+  marks.forEach((m) => m.clear()); marks = [];
+  cm.clearGutter('gutter-err');
+  editorDiags = [];
+  let list = [];
+  try { list = [...ls.getSyntacticDiagnostics(NODE_PATH), ...ls.getSemanticDiagnostics(NODE_PATH)]; } catch { /* ignore */ }
+  for (const d of list) {
+    if (d.category !== ts.DiagnosticCategory.Error || (d.start ?? 0) < prefix.length) continue;
+    const msg = ts.flattenDiagnosticMessageText(d.messageText, '\n');
+    const from = fromVirtual(d.start), to = fromVirtual(d.start + Math.max(d.length ?? 0, 1));
+    editorDiags.push({ line: from.line, ch: from.ch, message: msg });
+    marks.push(cm.markText(from, to, { className: 'cm-err-mark', attributes: { 'data-err': msg } }));
+    const g = document.createElement('span'); g.className = 'gutter-err'; g.textContent = '●'; g.title = msg;
+    cm.setGutterMarker(from.line, 'gutter-err', g);
+  }
+  renderAnalysis();
+  renderTree();
+}
+
+// --- Completion ---
+const KIND_VI = { function: 'command', method: 'command', property: 'property', const: 'const', let: 'var', var: 'var', alias: 'command', interface: 'type', type: 'type', string: 'value', keyword: 'keyword', parameter: 'param', 'local var': 'var', enum: 'enum' };
+function showHint(manual) {
+  if (!ls || !sel || (cm.state.completionActive && !manual)) return;
+  cm.showHint({ hint: tsHint, completeSingle: false, closeCharacters: /[\s()\[\]{};:>,=]/ });
+}
+function idHint(cur, line) {
+  const m = /runTest\(\s*(['"])([\w.\-]*)$/.exec(line.slice(0, cur.ch));
+  if (!m) return null;
+  const nodes = []; walk(root, (n) => n.id && nodes.push(n));
+  const list = nodes.filter((n) => n.id.startsWith(m[2])).map((n) => ({
+    text: n.id,
+    render(el) { el.innerHTML = '<span class="hint-kind">id</span><span></span><span class="hint-src"></span>'; el.children[1].textContent = n.id; el.children[2].textContent = n.name; },
+  }));
+  return list.length ? { list, from: CodeMirror.Pos(cur.line, cur.ch - m[2].length), to: cur } : null;
+}
+function tsHint(editor) {
+  const cur = editor.getCursor(), line = editor.getLine(cur.line);
+  const idh = idHint(cur, line);
+  if (idh) return idh;
+  let start = cur.ch;
+  while (start > 0 && /[\w$]/.test(line[start - 1])) start--;
+  const low = line.slice(start, cur.ch).toLowerCase();
+  let res;
+  try { res = ls.getCompletionsAtPosition(NODE_PATH, toVirtual(cur), { includeCompletionsWithInsertText: true }); } catch { return null; }
+  if (!res) return null;
+  const inString = res.entries.some((e) => e.kind === 'string');
+  const list = res.entries
+    .filter((e) => e.kind === 'property' || e.kind === 'string' || !HIDE.has(e.name))
+    .filter((e) => !low || e.name.toLowerCase().startsWith(low) || (low.length > 1 && e.name.toLowerCase().includes(low)))
+    .filter((e) => low || inString || res.isMemberCompletion || e.kind === 'property' || e.kind === 'string' || bistNameSet.has(e.name))
+    .sort((a, b) => (a.name.toLowerCase().startsWith(low) ? 0 : 1) - (b.name.toLowerCase().startsWith(low) ? 0 : 1) || (bistNameSet.has(b.name) - bistNameSet.has(a.name)) || (a.sortText ?? '').localeCompare(b.sortText ?? '') || a.name.localeCompare(b.name))
+    .slice(0, 120)
+    .map((e) => ({
+      text: e.insertText ?? e.name, entry: e,
+      render(el) { el.innerHTML = '<span class="hint-kind"></span><span></span>'; el.children[0].textContent = KIND_VI[e.kind] ?? e.kind; el.children[1].textContent = e.name; },
+      hint(cmi, data, comp) {
+        cmi.replaceRange(comp.text, data.from, data.to, 'complete');
+        const c = cmi.getCursor();
+        if (bistNameSet.has(e.name) && !NON_CALL.has(e.name) && !res.isMemberCompletion && cmi.getLine(c.line)[c.ch] !== '(') { cmi.replaceRange('(', c); scheduleSignature(0); }
+      },
+    }));
+  if (!list.length) return null;
+  let from = CodeMirror.Pos(cur.line, start), to = cur;
+  if (res.optionalReplacementSpan && inString) { from = fromVirtual(res.optionalReplacementSpan.start); to = fromVirtual(res.optionalReplacementSpan.start + res.optionalReplacementSpan.length); }
+  const data = { list, from, to };
+  CodeMirror.on(data, 'select', (comp, el) => showHintDoc(comp.entry, el));
+  CodeMirror.on(data, 'close', () => ($('hintDoc').style.display = 'none'));
+  return data;
+}
+function showHintDoc(entry, el) {
+  const box = $('hintDoc');
+  let d = null;
+  try { d = entry && ls.getCompletionEntryDetails(NODE_PATH, toVirtual(cm.getCursor()), entry.name, {}, entry.source, {}, entry.data); } catch { /* ignore */ }
+  if (!d) { box.style.display = 'none'; return; }
+  const doc = plain(d.documentation);
+  box.innerHTML = '<code></code>' + (doc ? '\n\n' : '') + '<span></span>';
+  box.children[0].textContent = plain(d.displayParts);
+  box.children[1].textContent = doc;
+  const r = el.closest('ul').getBoundingClientRect();
+  box.style.display = 'block'; box.style.top = r.top + 'px';
+  box.style.left = (r.right + 446 > innerWidth ? Math.max(4, r.left - 446) : r.right + 6) + 'px';
+}
+cm.on('inputRead', (editor, change) => {
+  const ch = change.text.join('');
+  if (/^[A-Za-z_$]$/.test(ch) || ch === '.' || ch === "'" || ch === '"') showHint(false);
+});
+
+let sigTimer = 0;
+function scheduleSignature(delay = 120) { clearTimeout(sigTimer); sigTimer = setTimeout(showSignature, delay); }
+function showSignature() {
+  if (!ls || !sel) return;
+  let s; try { s = ls.getSignatureHelpItems(NODE_PATH, toVirtual(cm.getCursor()), {}); } catch { s = null; }
+  if (!s || !s.items.length) return;
+  const box = $('sig'), it = s.items[s.selectedItemIndex] ?? s.items[0];
+  box.innerHTML = '';
+  const add = (t, cls) => { const sp = document.createElement('span'); if (cls) sp.className = cls; sp.textContent = t; box.appendChild(sp); };
+  add(plain(it.prefixDisplayParts));
+  it.parameters.forEach((p, i) => { if (i) add(plain(it.separatorDisplayParts)); add(plain(p.displayParts), i === s.argumentIndex ? 'p-on' : ''); });
+  add(plain(it.suffixDisplayParts));
+  const fdoc = plain(it.documentation), pdoc = plain(it.parameters[s.argumentIndex]?.documentation);
+  if (fdoc || pdoc) add('  — ' + [fdoc, pdoc].filter(Boolean).join(' · '), 'muted');
+}
+
+let tipTimer = 0;
+cm.getWrapperElement().addEventListener('mousemove', (ev) => {
+  clearTimeout(tipTimer); $('tip').style.display = 'none';
+  tipTimer = setTimeout(() => {
+    if (!ls || !sel) return;
+    const errEl = ev.target.closest?.('[data-err]');
+    let text = errEl ? '⚠ ' + errEl.getAttribute('data-err') : '';
+    if (!text) {
+      try {
+        const qi = ls.getQuickInfoAtPosition(NODE_PATH, toVirtual(cm.coordsChar({ left: ev.clientX, top: ev.clientY }, 'window')));
+        if (qi) text = plain(qi.displayParts) + (qi.documentation?.length ? '\n' + plain(qi.documentation) : '');
+      } catch { /* ignore */ }
+    }
+    if (!text) return;
+    const tip = $('tip'); tip.textContent = text; tip.style.display = 'block';
+    tip.style.left = Math.min(ev.clientX + 12, innerWidth - 540) + 'px'; tip.style.top = ev.clientY + 16 + 'px';
+  }, 450);
+});
+cm.getWrapperElement().addEventListener('mouseleave', () => { clearTimeout(tipTimer); $('tip').style.display = 'none'; });
+
+// ===== JSON =====
+let jsonPretty = false;
+function showJsonDlg() {
+  if (!root) return;
+  commitEditor();
+  $('jsonText').textContent = jsonPretty ? JSON.stringify(toJson(), null, 2) : toMini();
+  $('jsonSize').textContent = `${(new Blob([toMini()]).size / 1024).toFixed(1)} KB minified`;
+  $('jsonPretty').textContent = jsonPretty ? 'Minify' : 'Pretty';
+  if (!$('jsonDlg').open) $('jsonDlg').showModal();
+}
+
+// ===== Buttons, keys =====
+$('btnPlus').onclick = openPlusMenu;
+$('btnUndo').onclick = undo;
+$('btnRedo').onclick = redo;
+$('side').addEventListener('contextmenu', (e) => { if (e.target.closest('#tree li')) return; e.preventDefault(); openMenu({ x: e.clientX, y: e.clientY }, plusItems()); });
+$('btnProps').onclick = toggleProps;
+$('btnJson').onclick = showJsonDlg;
+$('wOpen').onclick = $('lnkOpen').onclick = openFile;
+$('wNew').onclick = $('lnkNew').onclick = newFile;
+$('jsonPretty').onclick = () => { jsonPretty = !jsonPretty; showJsonDlg(); };
+$('jsonCopy').onclick = async () => { try { await navigator.clipboard.writeText($('jsonText').textContent); toast('JSON copied'); } catch { toast("Couldn't copy – select the text and press Ctrl+C", true); } };
+$('jsonClose').onclick = () => $('jsonDlg').close();
+$('btnAna').onclick = () => { $('analysis').classList.toggle('min'); $('btnAna').firstElementChild.style.transform = $('analysis').classList.contains('min') ? 'rotate(180deg)' : ''; cm.refresh(); };
+$('tree').addEventListener('keydown', (e) => {
+  if (!root || !sel) return;
+  const order = [], hidden = new Set();
+  walk(root, (n, _num, p) => { if (p && (hidden.has(p) || collapsed.has(p))) { hidden.add(n); return; } order.push(n); });
+  const i = order.indexOf(sel);
+  if (e.altKey && e.key === 'ArrowUp') moveSel(-1);
+  else if (e.altKey && e.key === 'ArrowDown') moveSel(1);
+  else if (e.altKey && e.key === 'ArrowLeft') outdentSel();
+  else if (e.altKey && e.key === 'ArrowRight') indentSel();
+  else if (e.key === 'ArrowUp' && i > 0) select(order[i - 1]);
+  else if (e.key === 'ArrowDown' && i < order.length - 1) select(order[i + 1]);
+  else if (e.key === 'ArrowLeft' && isGroup(sel) && !collapsed.has(sel)) toggle(sel);
+  else if (e.key === 'ArrowRight' && isGroup(sel) && collapsed.has(sel)) toggle(sel);
+  else if (e.key === 'Delete') deleteSel();
+  else return;
+  e.preventDefault(); $('tree').focus();
+});
+function applyTheme(t) {
+  if (t) document.documentElement.dataset.theme = t;
+  const dark = (document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')) === 'dark';
+  $('btnTheme').innerHTML = icon(dark ? 'sun' : 'moon');
+}
+$('btnTheme').onclick = () => {
+  const cur = document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light');
+  const next = cur === 'dark' ? 'light' : 'dark';
+  applyTheme(next);
+  try { localStorage.setItem('bist-theme', next); } catch { /* ignore */ }
+};
+try { applyTheme(localStorage.getItem('bist-theme')); if (localStorage.getItem('bist-props') === '0') toggleProps(); } catch { applyTheme(); }
+document.addEventListener('keydown', (e) => {
+  const k = e.key.toLowerCase();
+  if ((e.ctrlKey || e.metaKey) && !e.altKey && k === 's') { e.preventDefault(); save(e.shiftKey); return; }
+  if ((e.ctrlKey || e.metaKey) && e.shiftKey && k === 'f' && !e.target.closest?.('.CodeMirror')) { e.preventDefault(); openSearch(); return; }
+  // Ctrl+Z / Ctrl+Y outside the code editor and inputs: project undo / redo
+  const inText = e.target.closest?.('.CodeMirror, input, textarea, select');
+  if (!inText && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') { e.preventDefault(); if (e.shiftKey) redo(); else undo(); }
+  if (!inText && (e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') { e.preventDefault(); redo(); }
+  if ((e.ctrlKey || e.metaKey) && e.key === 'o') { e.preventDefault(); openFile(); }
+});
+
+// ===== Agent: the user picks the AI source, its settings and the automation level =====
+// Each source's settings (URL, key, model) are stored only in this browser (localStorage), never in the .bist file.
+const AI_PROVIDERS = {
+  gemini: { label: 'Google Gemini API (free tier)', kind: 'gemini', key: true, model: 'gemini-flash-latest',
+    help: 'Free key: <a href="https://aistudio.google.com/apikey" target="_blank" rel="noopener">aistudio.google.com/apikey</a>. Free-tier prompts may be used by Google to improve its products.' },
+  openrouter: { label: 'OpenRouter (many models, some :free)', kind: 'openai', base: 'https://openrouter.ai/api/v1', key: true, model: 'meta-llama/llama-3.3-70b-instruct:free',
+    help: 'Key: <a href="https://openrouter.ai/keys" target="_blank" rel="noopener">openrouter.ai/keys</a>. Models ending in “:free” cost nothing (daily limits).' },
+  claude: { label: 'Claude (Anthropic API)', kind: 'anthropic', key: true, model: 'claude-sonnet-5-5',
+    help: 'Paid, best quality for writing tests. Key: <a href="https://console.anthropic.com/settings/keys" target="_blank" rel="noopener">console.anthropic.com</a>.' },
+  chatgpt: { label: 'ChatGPT (OpenAI API)', kind: 'openai', base: 'https://api.openai.com/v1', key: true, model: 'gpt-5-mini',
+    help: 'Paid per use (a ChatGPT Plus subscription does not include the API). Key: <a href="https://platform.openai.com/api-keys" target="_blank" rel="noopener">platform.openai.com/api-keys</a>.' },
+  ollama: { label: 'Ollama on this computer', kind: 'openai', base: 'http://localhost:11434/v1', key: false, editBase: true, model: 'qwen2.5-coder:7b', local: true,
+    help: 'Free, data stays on this computer. Install <a href="https://ollama.com" target="_blank" rel="noopener">ollama.com</a>, run <code>ollama pull qwen2.5-coder:7b</code>, and allow this page: set <code>OLLAMA_ORIGINS=*</code> then restart Ollama.' },
+  openai: { label: 'OpenAI-compatible server (Groq, LM Studio…)', kind: 'openai', base: 'https://api.groq.com/openai/v1', key: true, keyOptional: true, editBase: true, model: 'llama-3.3-70b-versatile',
+    help: 'Any server with the OpenAI chat API: e.g. https://api.openai.com/v1, https://api.groq.com/openai/v1, http://localhost:1234/v1 (LM Studio).' },
+  webllm: { label: 'WebLLM in this browser (experimental)', kind: 'webllm', key: false, model: 'Qwen2.5-Coder-1.5B-Instruct-q4f16_1-MLC', local: true,
+    help: 'Free, runs on this computer’s GPU inside the browser (WebGPU, Chrome / Edge). First use downloads the model (≈1–4 GB). Small models make more mistakes.' },
+};
+const AI_MODES = { chat: 'Ask', suggest: 'Agent', auto: 'Agent · auto' };
+const AI_SHORT = { gemini: 'Gemini', openrouter: 'OpenRouter', claude: 'Claude', chatgpt: 'ChatGPT', ollama: 'Ollama', openai: 'OpenAI-compatible', webllm: 'WebLLM' };
+let ai = { provider: 'gemini', mode: 'suggest', cfg: {} };
+try {
+  const old = JSON.parse(localStorage.getItem('bist-ai') || '{}');
+  ai = { ...ai, ...old, cfg: old.cfg ?? {} };
+  if (old.key && !old.cfg) ai.cfg[old.provider || 'gemini'] = { key: old.key, model: old.model }; // settings from an older version
+} catch { /* ignore */ }
+const aiCfg = (p = ai.provider) => { const d = AI_PROVIDERS[p]; const c = ai.cfg[p] ?? {}; return { key: c.key ?? '', model: c.model || d.model, base: c.base || d.base || '', models: c.models ?? [] }; };
+const aiSetCfg = (patch, p = ai.provider) => { ai.cfg[p] = { ...(ai.cfg[p] ?? {}), ...patch }; };
+const aiSaveCfg = () => { try { localStorage.setItem('bist-ai', JSON.stringify(ai)); } catch { /* ignore */ } };
+const aiReady = () => { const d = AI_PROVIDERS[ai.provider]; return !d.key || d.keyOptional || !!aiCfg().key; };
+let chat = [];          // { role: 'user' | 'ai' | 'err', text }
+let aiAbort = null;
+
+function selectPTab(name) {
+  document.querySelectorAll('.ptabs button').forEach((b) => b.classList.toggle('on', b.dataset.ptab === name));
+  $('propForm').hidden = name !== 'props';
+  $('agent').hidden = name !== 'agent';
+  if (name === 'agent') { if ($('work').classList.contains('noprops')) toggleProps(); aiRefreshBar(); if (!aiReady()) aiOpenSettings(); else $('aiInput').focus(); renderChat(); }
+  try { localStorage.setItem('bist-ptab', name); } catch { /* ignore */ }
+}
+document.querySelectorAll('.ptabs button').forEach((b) => (b.onclick = () => selectPTab(b.dataset.ptab)));
+
+function aiRefreshBar() {
+  const d = AI_PROVIDERS[ai.provider];
+  $('aiModelLbl').textContent = aiReady() ? `${AI_SHORT[ai.provider]} · ${aiCfg().model} · ${AI_MODES[ai.mode]}` : 'Set up AI source…';
+  $('aiChip').title = `${d.label}\nModel: ${aiCfg().model}\nMode: ${AI_MODES[ai.mode]} – click to change`;
+}
+// AI source dialog: edits a draft; Cancel restores the old settings, OK saves and uses the selected source
+let aiBackup = null;
+const AI_TAG = { gemini: 'Cloud · free tier', openrouter: 'Cloud · free & paid models', claude: 'Cloud · paid', chatgpt: 'Cloud · paid', ollama: 'This computer · free', openai: 'Any OpenAI-style server', webllm: 'In browser · free · GPU' };
+function renderSrcList() {
+  const ul = $('aiSrcList'); ul.innerHTML = '';
+  const inUse = aiBackup ? JSON.parse(aiBackup).provider : ai.provider;
+  for (const [k, d] of Object.entries(AI_PROVIDERS)) {
+    const li = document.createElement('li');
+    li.className = k === ai.provider ? 'on' : '';
+    const ready = !d.key || d.keyOptional || !!aiCfg(k).key;
+    li.innerHTML = '<span class="n"></span><span class="b"></span><span class="t"></span>';
+    li.children[0].textContent = d.label.replace(/ \(.*$/, '');
+    const b = li.children[1];
+    if (k === inUse) { b.className = 'b use'; b.textContent = 'In use'; }
+    else if (ready) { b.className = 'b ok'; b.textContent = d.key && aiCfg(k).key ? '✓ key' : '✓'; }
+    else { b.className = 'b no'; b.textContent = 'needs key'; }
+    li.children[2].textContent = AI_TAG[k];
+    li.onclick = () => { ai.provider = k; aiFillForm(); };
+    ul.appendChild(li);
+  }
+}
+function aiFillForm() {
+  const d = AI_PROVIDERS[ai.provider], c = aiCfg();
+  renderSrcList();
+  $('aiSrcTitle').textContent = d.label;
+  $('aiHelp').innerHTML = d.help;
+  $('aiBaseRow').hidden = !d.editBase; $('aiBase').value = c.base;
+  $('aiKeyRow').hidden = !d.key; $('aiKey').value = c.key; $('aiKey').placeholder = d.keyOptional ? 'API key (if the server needs one)' : 'Paste your API key';
+  $('aiModel').value = c.model;
+  const dl = $('aiModelList'); dl.innerHTML = '';
+  for (const m of [...new Set([d.model, ...c.models])]) { const o = document.createElement('option'); o.value = m; dl.appendChild(o); }
+  $('aiKind').value = ai.mode === 'chat' ? 'ask' : 'agent';
+  $('aiLevel').value = ai.mode === 'auto' ? 'auto' : 'suggest';
+  $('aiLevelRow').hidden = ai.mode === 'chat';
+  $('aiPrivacy').innerHTML = d.local
+    ? 'Data stays on this computer.'
+    : 'Settings are stored only in this browser. Chatting sends the open project (names, ids, steps – no passwords) to this provider.';
+  $('aiDlgNote').textContent = `OK uses ${d.label.replace(/ \(.*$/, '')}`;
+}
+function aiOpenSettings() {
+  aiBackup = JSON.stringify(ai);
+  aiFillForm();
+  if (!$('aiDlg').open) $('aiDlg').showModal();
+  $('aiChip').classList.add('on');
+}
+function aiCloseSettings(ok) {
+  if (!ok && aiBackup) { const b = JSON.parse(aiBackup); ai.provider = b.provider; ai.mode = b.mode; ai.cfg = b.cfg; }
+  aiBackup = null;
+  if (ok) aiSaveCfg();
+  if ($('aiDlg').open) $('aiDlg').close();
+  $('aiChip').classList.remove('on');
+  aiRefreshBar(); renderChat(); $('aiInput').focus();
+}
+$('aiChip').onclick = aiOpenSettings;
+$('aiOk').onclick = () => aiCloseSettings(true);
+$('aiCancel').onclick = $('aiDlgX').onclick = () => aiCloseSettings(false);
+$('aiDlg').addEventListener('cancel', (e) => { e.preventDefault(); aiCloseSettings(false); }); // Esc = Cancel
+$('aiDlg').addEventListener('click', (e) => { if (e.target === $('aiDlg')) aiCloseSettings(false); });
+$('aiBase').oninput = (e) => { aiSetCfg({ base: e.target.value.trim().replace(/\/+$/, '') }); renderSrcList(); };
+$('aiKey').oninput = (e) => { aiSetCfg({ key: e.target.value.trim() }); renderSrcList(); };
+$('aiModel').oninput = (e) => aiSetCfg({ model: e.target.value.trim() });
+$('aiKind').onchange = (e) => { ai.mode = e.target.value === 'ask' ? 'chat' : $('aiLevel').value; $('aiLevelRow').hidden = ai.mode === 'chat'; };
+$('aiLevel').onchange = (e) => { if (ai.mode !== 'chat') ai.mode = e.target.value; };
+$('aiModels').onclick = async () => {
+  const d = AI_PROVIDERS[ai.provider], c = aiCfg();
+  $('aiModels').disabled = true;
+  try {
+    let ids;
+    if (d.kind === 'gemini') {
+      const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200', { headers: { 'x-goog-api-key': c.key } });
+      const j = await r.json(); if (!r.ok) throw new Error(j.error?.message || r.status);
+      ids = j.models.filter((m) => (m.supportedGenerationMethods ?? []).includes('generateContent')).map((m) => m.name.replace(/^models\//, ''));
+    } else if (d.kind === 'anthropic') {
+      const r = await fetch('https://api.anthropic.com/v1/models?limit=100', { headers: anthropicHeaders(c.key) });
+      const j = await r.json(); if (!r.ok) throw new Error(j.error?.message || r.status);
+      ids = j.data.map((m) => m.id);
+    } else if (d.kind === 'webllm') {
+      const w = await loadWebLLM();
+      ids = w.prebuiltAppConfig.model_list.map((m) => m.model_id).filter((id) => /Instruct|Chat/i.test(id));
+    } else {
+      const r = await fetch(`${c.base}/models`, { headers: c.key ? { Authorization: `Bearer ${c.key}` } : {} });
+      const j = await r.json(); if (!r.ok) throw new Error(j.error?.message || r.status);
+      ids = (j.data ?? j.models ?? []).map((m) => m.id ?? m.name);
+      if (ai.provider === 'chatgpt') ids = ids.filter((id) => /^(gpt-|o\d|chatgpt)/.test(id) && !/(audio|realtime|tts|transcribe|image|embedding|search)/.test(id));
+      if (ai.provider === 'openrouter') ids.sort((a, b) => (b.endsWith(':free') - a.endsWith(':free')) || a.localeCompare(b));
+    }
+    aiSetCfg({ models: ai.provider === 'openrouter' ? ids : ids.sort() }); aiFillForm(); toast(`Loaded ${ids.length} models – pick one in the Model box`);
+  } catch (e) {
+    toast(`Couldn't load models: ${e.message}${ai.provider === 'ollama' ? ' – is Ollama running with OLLAMA_ORIGINS=* ?' : ''}`, true);
+  } finally { $('aiModels').disabled = false; }
+};
+$('aiClear').onclick = () => { if (aiAbort) aiAbort.abort(); chat = []; renderChat(); $('aiInput').focus(); };
+
+// Context sent to the model: BIST rules, the command API (extracted from bist.ts), the open project, the selected item, current errors
+function bistApiText() {
+  const cut = (a, b) => { const i = bistSource.indexOf(a), j = bistSource.indexOf(b, i + 1); return i >= 0 && j > i ? bistSource.slice(i, j) : ''; };
+  return cut('// ==== Types ====', '// ==== Command table') + '\n' + cut('// ==== Building actions ====', '// ==== Script tree ====');
+}
+function aiSystemPrompt() {
+  const cur = sel ? `${numberOf(sel) || 'root'} "${sel.name}"${sel.id ? ' #' + sel.id : ''} (${sel.type})` : 'nothing';
+  const errs = validation.map((e) => `- ${numberOf(e.node) || 'root'}: ${e.message}`).concat(editorDiags.map((d) => `- editor line ${d.line + 1}: ${d.message}`)).join('\n') || '(none)';
+  return `You are the assistant inside "BIST Editor", a tool to write BIST test scripts for Flutter apps (BIST runs inside the app and drives the UI).
+Answer in the user's language, briefly.
+
+## BIST model
+- A script is a tree: TestGroup (children independent; pre/after run around EACH child), TestSequence (children run in order, stop on failure; pre/after once), TestUnit (a test with steps).
+- Node fields: type ('group'|'sequence'|'unit'), name (required), id (optional, unique in the project, [A-Za-z0-9_.-]; used by runTest('<id>')), minVersion/maxVersion ('1.0.0+10'), manual (reason the test can't be automated), writes (true if it creates/changes data), pre, after, steps (unit only), cases (groups).
+- Steps are BIST commands. In the editor each item's steps are written as JavaScript calling the BIST library:
+  export default { pre: [...], steps: [...], after: [...] }   (groups have only pre and after)
+- Values may use {{now}}, {{date:+1}}, {{i}}, {{name}} (variables), env('key') for app / user / server info, and tc('Group','field') for test data provided by the app (BistProvider.testData, e.g. test accounts). Never write passwords.
+- Find widgets by text (visible text), id (Key), type ('button'|'input'|'text'|'image'), icon (e.g. 'add', 'logout'), route, inside (text of the containing card). Prefer visible text + type.
+
+## BIST library (TypeScript)
+\`\`\`ts
+${bistApiText()}
+\`\`\`
+
+## Proposing changes
+${ai.mode === 'chat' ? 'Mode: CHAT ONLY. Do not propose project changes and never use bist-steps / bist-add blocks; you may show example code in normal js blocks.' : ai.mode === 'auto'
+  ? 'Mode: AUTO APPLY. Blocks below are applied to the project immediately (the user can Undo), so only output them when the user asks to write or change tests.'
+  : 'Mode: SUGGEST. The user reviews each block and clicks Apply. Only output them when the user asks to write or change tests.'}
+Use exactly these fenced blocks:
+1. Replace the steps of an existing item (target = its number like 1.2 or its id; whole object, all sections):
+\`\`\`bist-steps target=1.2
+export default {
+  pre: [],
+  steps: [
+    tap({ text: 'Save', type: 'button' }),
+  ],
+  after: [],
+};
+\`\`\`
+2. Add a new item (JSON in BIST format, steps as {"cmd": ...} objects; parent = number, id or root):
+\`\`\`bist-add parent=1
+{"type":"unit","id":"login.new","name":"New test","steps":[{"cmd":"tap","text":"Save","type":"button"}]}
+\`\`\`
+Keep ids unique. Explain in one or two sentences before the block.
+
+## Open project (JSON; item numbers: children of the root are 1, 2, …; their children 1.1, 1.2, …)
+${root ? JSON.stringify(toJson()) : '(no project open)'}
+
+## Selected item
+${cur}
+${sel ? 'Its current code:\n```js\n' + cm.getValue() + '\n```' : ''}
+
+## Current problems
+${errs}`;
+}
+
+async function aiSend() {
+  const text = $('aiInput').value.trim();
+  if ((!text && !aiPending.length) || aiAbort) return;
+  if (!aiReady()) { aiOpenSettings(); toast('Set up the AI source first', true); return; }
+  commitEditor();
+  chat.push({ role: 'user', text, files: aiPending.splice(0) });
+  renderPending();
+  const msg = { role: 'ai', text: '', progress: '' };
+  chat.push(msg);
+  $('aiInput').value = '';
+  renderChat();
+  aiAbort = new AbortController();
+  setSendIcon(true);
+  try {
+    await aiStream(aiSystemPrompt(), chat.slice(0, -1), (t) => { msg.progress = ''; msg.text += t; renderChat(true); }, aiAbort.signal, (p) => { msg.progress = p; renderChat(true); });
+    if (!msg.text) msg.text = '(empty answer)';
+    if (ai.mode === 'auto') autoApply(chat.length - 1);
+  } catch (e) {
+    if (e.name !== 'AbortError') {
+      msg.role = 'err';
+      msg.text = 'Error: ' + e.message + (e instanceof TypeError && AI_PROVIDERS[ai.provider].kind === 'openai' && ai.provider === 'ollama' ? ' – is Ollama running, with OLLAMA_ORIGINS=* ?' : '');
+    }
+  } finally {
+    msg.progress = '';
+    aiAbort = null; setSendIcon(false); renderChat();
+  }
+}
+const anthropicHeaders = (key) => ({ 'x-api-key': key, 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' });
+
+// Read an SSE stream (data: …), call onData with each JSON
+async function readSSE(r, onData) {
+  const reader = r.body.getReader(), dec = new TextDecoder();
+  let buf = '';
+  for (;;) {
+    const { value, done } = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, { stream: true });
+    let i;
+    while ((i = buf.indexOf('\n')) >= 0) {
+      const line = buf.slice(0, i).trim(); buf = buf.slice(i + 1);
+      if (!line.startsWith('data:')) continue;
+      const data = line.slice(5).trim();
+      if (data === '[DONE]') return;
+      let j; try { j = JSON.parse(data); } catch { continue; }
+      if (j.error) throw new Error(j.error.message || JSON.stringify(j.error));
+      onData(j);
+    }
+  }
+}
+async function httpError(r) {
+  let m = `${r.status} ${r.statusText}`;
+  try { const j = await r.json(); m = j.error?.message || j.message || JSON.stringify(j).slice(0, 300); } catch { /* ignore */ }
+  return new Error(m);
+}
+
+// Fallback Gemini models available to the key: newest numbered Flash first, then Flash-Lite (light, rarely overloaded); skip image / tts / experimental
+async function geminiFallbacks(key, failed) {
+  try {
+    const r = await fetch('https://generativelanguage.googleapis.com/v1beta/models?pageSize=200', { headers: { 'x-goog-api-key': key } });
+    if (!r.ok) return [];
+    const ids = ((await r.json()).models ?? [])
+      .filter((m) => (m.supportedGenerationMethods ?? []).includes('generateContent'))
+      .map((m) => m.name.replace(/^models\//, ''));
+    const ver = (id) => parseFloat(id.match(/gemini-([\d.]+)/)?.[1] ?? '0');
+    const pick = (re) => ids.filter((id) => re.test(id)).sort((x, y) => ver(y) - ver(x));
+    // gemini-flash-latest is the newest Flash: if it's busy, skip that one too
+    const flash = pick(/^gemini-[\d.]+-flash$/).slice(failed === 'gemini-flash-latest' ? 1 : 0);
+    return [...flash.slice(0, 1), ...pick(/^gemini-[\d.]+-flash-lite$/).slice(0, 2), ...pick(/^gemini-flash-lite-latest$/), ...flash.slice(1, 2)];
+  } catch { return []; }
+}
+const GEMINI_WAIT = 20000; // no response within this time (overloaded models often hang for a long time) → try another model
+// Saved model was just busy and the fallback answered: for the next 10 minutes send straight to the fallback, no waiting again
+let geminiDetour = null; // { from, to, until }
+
+// Call the selected AI source, streaming text chunks through onText
+async function aiStream(system, history, onText, signal, onProgress) {
+  const d = AI_PROVIDERS[ai.provider], c = aiCfg();
+  const msgs = history.filter((m) => m.role === 'user' || m.role === 'ai');
+  // Message text (including attached text files) and attached images
+  const textOf = (m) => [m.text, ...(m.files ?? []).filter((f) => f.text != null).map((f) => `Attached file "${f.name}":\n\`\`\`\n${f.text}\n\`\`\``)].filter(Boolean).join('\n\n');
+  const imgsOf = (m) => (m.files ?? []).filter((f) => f.data);
+  if (d.kind === 'gemini') {
+    const send = (model, sig) => fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:streamGenerateContent?alt=sse`, {
+      method: 'POST', signal: sig, headers: { 'Content-Type': 'application/json', 'x-goog-api-key': c.key },
+      body: JSON.stringify({ systemInstruction: { parts: [{ text: system }] }, contents: msgs.map((m) => ({ role: m.role === 'user' ? 'user' : 'model', parts: [{ text: textOf(m) }, ...imgsOf(m).map((f) => ({ inline_data: { mime_type: f.type, data: f.data.split(',')[1] } }))] })), generationConfig: { temperature: 0.3 } }),
+    });
+    // Send to one model, wait up to GEMINI_WAIT for a response; the user's Stop still cancels, even while reading
+    const tryModel = async (model) => {
+      const ctl = new AbortController();
+      signal.addEventListener('abort', () => ctl.abort(), { once: true });
+      const timer = setTimeout(() => ctl.abort(), GEMINI_WAIT);
+      try { return await send(model, ctl.signal); } catch (e) { if (signal.aborted) throw e; return null; } finally { clearTimeout(timer); }
+    };
+    // Model retired (404) → replace the saved model; model busy (503 / 429 / 500 / too slow) → try a fallback model this time
+    const detour = geminiDetour && geminiDetour.from === c.model && geminiDetour.until > Date.now() ? geminiDetour.to : null;
+    let model = detour ?? c.model, list = null, r;
+    const tried = new Set();
+    for (;;) {
+      tried.add(model);
+      r = await tryModel(model);
+      if (r?.ok) break;
+      const err = r ? await httpError(r) : new Error(`${model} did not answer within ${GEMINI_WAIT / 1000} s (overloaded?)`);
+      const retired = !!r && (r.status === 404 || /no longer available|not found|deprecated/i.test(err.message));
+      const busy = !r || [429, 500, 503, 504].includes(r.status) || /high demand|overloaded|unavailable|quota|exhausted/i.test(err.message);
+      if (!retired && !busy) throw err;
+      list ??= await geminiFallbacks(c.key, model);
+      const next = list.find((m) => !tried.has(m));
+      if (!next) throw err;
+      if (retired && model === c.model) { aiSetCfg({ model: next }); aiSaveCfg(); aiRefreshBar(); toast(`${model} is no longer available – switched to ${next}`); }
+      else toast(`${model} is busy – trying ${next}`);
+      onProgress?.(`${model} is busy – asking ${next}…`);
+      model = next;
+    }
+    if (model !== c.model) geminiDetour = { from: c.model, to: model, until: Date.now() + 600000 };
+    return readSSE(r, (j) => { const t = (j.candidates?.[0]?.content?.parts ?? []).map((p) => p.text ?? '').join(''); if (t) onText(t); });
+  }
+  if (d.kind === 'anthropic') {
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST', signal, headers: { 'Content-Type': 'application/json', ...anthropicHeaders(c.key) },
+      body: JSON.stringify({ model: c.model, max_tokens: 8192, stream: true, temperature: 0.3, system, messages: msgs.map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant', content: imgsOf(m).length ? [...imgsOf(m).map((f) => ({ type: 'image', source: { type: 'base64', media_type: f.type, data: f.data.split(',')[1] } })), { type: 'text', text: textOf(m) }] : textOf(m) })) }),
+    });
+    if (!r.ok) throw await httpError(r);
+    return readSSE(r, (j) => { if (j.type === 'content_block_delta' && j.delta?.text) onText(j.delta.text); });
+  }
+  const oaMsgs = [{ role: 'system', content: system }, ...msgs.map((m) => ({ role: m.role === 'user' ? 'user' : 'assistant',
+    content: imgsOf(m).length && d.kind !== 'webllm' ? [{ type: 'text', text: textOf(m) }, ...imgsOf(m).map((f) => ({ type: 'image_url', image_url: { url: f.data } }))] : textOf(m) }))];
+  if (d.kind === 'webllm') {
+    const engine = await webllmEngine(c.model, onProgress);
+    const stream = await engine.chat.completions.create({ messages: oaMsgs, stream: true, temperature: 0.3 });
+    for await (const ch of stream) {
+      if (signal.aborted) { engine.interruptGenerate?.(); throw new DOMException('Aborted', 'AbortError'); }
+      const t = ch.choices?.[0]?.delta?.content; if (t) onText(t);
+    }
+    return;
+  }
+  // OpenAI-compatible: OpenRouter, Ollama, OpenAI, Groq, LM Studio…
+  const headers = { 'Content-Type': 'application/json' };
+  if (c.key) headers.Authorization = `Bearer ${c.key}`;
+  if (ai.provider === 'openrouter') headers['X-Title'] = 'BIST Editor';
+  const r = await fetch(`${c.base}/chat/completions`, { method: 'POST', signal, headers, body: JSON.stringify({ model: c.model, stream: true, messages: oaMsgs,
+    // OpenAI reasoning models (gpt-5…, o1/o3/o4…) don't accept a non-default temperature
+    ...(/^(gpt-5|o\d)/.test(c.model) ? {} : { temperature: 0.3 }) }) });
+  if (!r.ok) throw await httpError(r);
+  return readSSE(r, (j) => { const t = j.choices?.[0]?.delta?.content; if (t) onText(t); });
+}
+
+// WebLLM: loads the library (jsDelivr) and the model on first use
+let webllmLib = null, webllmEng = null, webllmModel = '';
+async function loadWebLLM() {
+  if (!navigator.gpu) throw new Error('this browser has no WebGPU (use a recent Chrome / Edge on a computer with a GPU)');
+  webllmLib ??= await import('https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.79/+esm');
+  return webllmLib;
+}
+async function webllmEngine(model, onProgress) {
+  const w = await loadWebLLM();
+  if (webllmEng && webllmModel === model) return webllmEng;
+  onProgress?.('Loading model… (first time downloads it, may take minutes)');
+  webllmEng = await w.CreateMLCEngine(model, { initProgressCallback: (p) => onProgress?.(p.text) });
+  webllmModel = model;
+  return webllmEng;
+}
+
+// Auto apply mode: apply every proposed block of the answer
+function autoApply(mi) {
+  const m = chat[mi]; if (!m || m.role !== 'ai') return;
+  const parts = m.text.split(/```/);
+  let ok = 0, bad = 0;
+  parts.forEach((part, pi) => {
+    if (pi % 2 === 0 || pi === parts.length - 1) return;
+    const nl = part.indexOf('\n');
+    const am = /^bist-(steps|add)\b\s*(?:(target|parent)=(\S+))?/.exec((nl < 0 ? part : part.slice(0, nl)).trim());
+    if (!am) return;
+    const key = `${mi}:${pi}`;
+    try { applyAction(am[1], findNodeRef(am[3] ?? ''), part.slice(nl + 1).replace(/\n$/, '')); actionState.set(key, 'applied'); ok++; }
+    catch (e) { actionState.set(key, e.message); bad++; }
+  });
+  if (ok || bad) toast(`Auto applied ${ok} change${ok === 1 ? '' : 's'}${bad ? `, ${bad} failed` : ''} – Undo to revert`, !!bad);
+}
+
+// Render messages: plain text + code blocks; bist-steps / bist-add blocks become Apply / Discard cards
+const esc = (t) => t.replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' })[c]);
+const inlineMd = (t) => esc(t).replace(/`([^`]+)`/g, '<code>$1</code>').replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>').replace(/\n/g, '<br>');
+const actionState = new Map(); // block key → 'applied' | 'discarded' | error
+function renderChat(streaming = false) {
+  const ul = $('aiMsgs');
+  const atBottom = ul.scrollTop + ul.clientHeight >= ul.scrollHeight - 30;
+  ul.innerHTML = '';
+  if (!chat.length) {
+    ul.innerHTML = `<li class="hint">Ask anything about BIST, or ask the agent to write / fix tests. It sees the open project, the selected item and the problems in Analysis. ${ai.mode === 'chat' ? 'Mode: <b>Chat only</b> – it never changes the project.' : ai.mode === 'auto' ? 'Mode: <b>Auto apply</b> – changes are applied right away (Undo works).' : 'Mode: <b>Suggest</b> – changes are shown as cards, click <b>Apply</b> to use them (Undo works).'} Change the source, model and mode with the button under the message box.</li>`;
+    return;
+  }
+  chat.forEach((m, mi) => {
+    const li = document.createElement('li');
+    li.className = m.role;
+    if (m.role !== 'ai') {
+      li.textContent = m.text;
+      if (m.files?.length) { const fs = document.createElement('div'); fs.className = 'afiles'; for (const f of m.files) fs.appendChild(fileChip(f)); li.appendChild(fs); }
+      ul.appendChild(li); return;
+    }
+    if (m.progress) { const pg = document.createElement('div'); pg.className = 'aiprog'; pg.textContent = m.progress; li.appendChild(pg); }
+    if (!m.text && !m.progress && aiAbort) { const pg = document.createElement('div'); pg.className = 'aiprog'; pg.textContent = 'Thinking…'; li.appendChild(pg); }
+    const parts = m.text.split(/```/);
+    parts.forEach((part, pi) => {
+      if (pi % 2 === 0) { if (part.trim()) { const d = document.createElement('div'); d.innerHTML = inlineMd(part.trim()); li.appendChild(d); } return; }
+      const nl = part.indexOf('\n');
+      const head = (nl < 0 ? part : part.slice(0, nl)).trim(), body = nl < 0 ? '' : part.slice(nl + 1).replace(/\n$/, '');
+      const closed = pi < parts.length - 1;
+      const am = /^bist-(steps|add)\b\s*(?:(target|parent)=(\S+))?/.exec(head);
+      if (am && closed && ai.mode !== 'chat') { li.appendChild(actionCard(`${mi}:${pi}`, am[1], am[3] ?? '', body)); return; }
+      const pre = document.createElement('pre'); pre.textContent = body; li.appendChild(pre);
+    });
+    ul.appendChild(li);
+  });
+  if (atBottom || !streaming) ul.scrollTop = ul.scrollHeight;
+}
+function findNodeRef(ref) {
+  if (!root) return null;
+  if (!ref || ref === 'root') return root;
+  let r = null;
+  walk(root, (n, num) => { if (num === ref || n.id === ref) r = r ?? n; });
+  return r;
+}
+function actionCard(key, kind, ref, body) {
+  const card = document.createElement('div');
+  const st = actionState.get(key);
+  card.className = 'aicard' + (st === 'applied' || st === 'discarded' ? ' done' : '');
+  const target = findNodeRef(ref);
+  const label = kind === 'steps' ? `Replace steps of ${target ? nodeLabel(target) : ref || '?'}` : `Add to ${target ? (target === root ? 'project root' : nodeLabel(target)) : ref || '?'}`;
+  card.innerHTML = '<div class="h"><span></span><span class="sp"></span><span class="st"></span></div><pre></pre>';
+  card.querySelector('.h span').textContent = label;
+  let shown = body;
+  if (kind === 'add') { try { shown = JSON.stringify(JSON.parse(body), null, 2); } catch { /* keep as is */ } }
+  card.querySelector('pre').textContent = shown;
+  const stEl = card.querySelector('.st');
+  if (st === 'applied') stEl.textContent = '✓ Applied';
+  else if (st === 'discarded') stEl.textContent = 'Discarded';
+  else {
+    if (st) { stEl.textContent = '✗ ' + st; stEl.style.color = 'var(--err)'; }
+    const ap = document.createElement('button'); ap.className = 'btn primary'; ap.textContent = 'Apply';
+    const ds = document.createElement('button'); ds.className = 'btn'; ds.textContent = 'Discard';
+    ap.onclick = () => { try { applyAction(kind, target, body); actionState.set(key, 'applied'); } catch (e) { actionState.set(key, e.message); } renderChat(); };
+    ds.onclick = () => { actionState.set(key, 'discarded'); renderChat(); };
+    card.querySelector('.h').append(ds, ap);
+  }
+  return card;
+}
+function applyAction(kind, target, body) {
+  if (!target) throw new Error('target item not found');
+  commitEditor();
+  if (kind === 'steps') {
+    const r = evalNodeCode(body, target);
+    for (const sec of sections(target)) {
+      if (sec === 'steps') target.steps = r.steps;
+      else if (r[sec].length) target[sec] = r[sec]; else delete target[sec];
+    }
+    changed(); select(target);
+    toast('Applied – Undo to revert');
+    return;
+  }
+  if (!isGroup(target)) throw new Error('parent must be a group');
+  let node;
+  try { node = JSON.parse(body); } catch (e) { throw new Error('invalid JSON: ' + e.message); }
+  const errs = bistLib.validate({ schema: bistLib.SCHEMA, type: 'group', id: '__check', name: 'check', cases: [node] }).filter((m) => !/^Root/.test(m));
+  if (errs.length) throw new Error(errs[0]);
+  const ids = new Set(); walk(root, (n) => n.id && ids.add(n.id));
+  let dup = null; walk(node, (n) => { if (n.id && ids.has(n.id)) dup = n.id; });
+  if (dup) throw new Error(`id "${dup}" already exists`);
+  target.cases.push(node); collapsed.delete(target);
+  changed(); select(node);
+  toast('Added – Undo to revert');
+}
+$('aiSend').onclick = () => { if (aiAbort) aiAbort.abort(); else aiSend(); };
+function setSendIcon(busy) { $('aiSend').innerHTML = `<svg class="i"><use href="#i-${busy ? 'stop' : 'send'}"/></svg>`; $('aiSend').title = busy ? 'Stop' : 'Send (Enter)'; }
+
+// Attachments: text files (≤ 300 KB) are sent as content; images (≤ 5 MB) are sent as images to models that can read them
+let aiPending = [];
+const TEXT_EXT = /\.(bist|json|jsonc|js|mjs|ts|dart|txt|md|log|csv|tsv|yaml|yml|xml|html?|css|sql|ini|env\.example|properties|gradle|kt|swift)$/i;
+function fileChip(f, onRemove) {
+  const c = document.createElement('span'); c.className = 'afile';
+  if (f.data) { const im = document.createElement('img'); im.src = f.data; c.appendChild(im); } else c.insertAdjacentHTML('beforeend', '<svg class="i" style="width:12px;height:12px"><use href="#i-clip"/></svg>');
+  const n = document.createElement('span'); n.textContent = f.name; c.appendChild(n);
+  if (onRemove) { const b = document.createElement('button'); b.title = 'Remove'; b.innerHTML = '<svg class="i"><use href="#i-x"/></svg>'; b.onclick = onRemove; c.appendChild(b); }
+  return c;
+}
+function renderPending() {
+  const box = $('aiFiles'); box.innerHTML = '';
+  aiPending.forEach((f, i) => box.appendChild(fileChip(f, () => { aiPending.splice(i, 1); renderPending(); })));
+}
+async function addFiles(list) {
+  for (const file of list) {
+    try {
+      if (file.type.startsWith('image/')) {
+        if (file.size > 5 * 1024 * 1024) { toast(`${file.name}: images up to 5 MB`, true); continue; }
+        const data = await new Promise((ok, no) => { const r = new FileReader(); r.onload = () => ok(r.result); r.onerror = () => no(r.error); r.readAsDataURL(file); });
+        aiPending.push({ name: file.name, type: file.type, data });
+      } else if (file.type.startsWith('text/') || /json|javascript|xml|yaml/.test(file.type) || TEXT_EXT.test(file.name)) {
+        if (file.size > 300 * 1024) { toast(`${file.name}: text files up to 300 KB`, true); continue; }
+        aiPending.push({ name: file.name, type: file.type || 'text/plain', text: await file.text() });
+      } else toast(`${file.name}: only text files and images can be attached`, true);
+    } catch (e) { toast(`Couldn't read ${file.name}: ${e.message}`, true); }
+  }
+  renderPending();
+}
+$('aiAttach').onclick = () => $('aiFilePick').click();
+$('aiFilePick').onchange = (e) => { addFiles([...e.target.files]); e.target.value = ''; $('aiInput').focus(); };
+// Paste images / drag and drop files into the input box
+$('aiInput').addEventListener('paste', (e) => { const fs = [...(e.clipboardData?.files ?? [])]; if (fs.length) { e.preventDefault(); addFiles(fs); } });
+$('aiComposer').addEventListener('dragover', (e) => { e.preventDefault(); });
+$('aiComposer').addEventListener('drop', (e) => { e.preventDefault(); addFiles([...(e.dataTransfer?.files ?? [])]); });
+// Input box grows with its content
+$('aiInput').addEventListener('input', () => { const t = $('aiInput'); t.style.height = 'auto'; t.style.height = Math.min(t.scrollHeight, innerHeight * 0.4) + 'px'; });
+setSendIcon(false);
+$('aiInput').addEventListener('keydown', (e) => { if (e.key === 'Enter' && !e.shiftKey && !e.isComposing) { e.preventDefault(); aiSend(); } });
+try { if (localStorage.getItem('bist-ptab') === 'agent') setTimeout(() => selectPTab('agent'), 0); } catch { /* ignore */ }
+
+// ===== Resize handles (remembered in localStorage) =====
+const SIZES = { 'side-w': [200, 600], 'props-w': [220, 640], 'ana-h': [80, 600] };
+function setSize(k, v) {
+  const [lo, hi] = SIZES[k];
+  v = Math.round(Math.max(lo, Math.min(hi, v)));
+  document.documentElement.style.setProperty(`--${k}`, v + 'px');
+  return v;
+}
+function dragSplit(el, k, axis, calc) {
+  el.addEventListener('pointerdown', (e) => {
+    if (k === 'ana-h' && $('analysis').classList.contains('min')) $('btnAna').click();
+    e.preventDefault();
+    el.setPointerCapture(e.pointerId);
+    el.classList.add('drag');
+    document.body.classList.add('dragging', axis);
+    let last = 0;
+    const move = (ev) => { last = setSize(k, calc(ev)); if (k === 'props-w') placePropsSplit(); };
+    const up = () => {
+      el.removeEventListener('pointermove', move); el.removeEventListener('pointerup', up);
+      el.classList.remove('drag'); document.body.classList.remove('dragging', axis);
+      try { if (last) localStorage.setItem(`bist-${k}`, last); } catch { /* ignore */ }
+      cm.refresh();
+    };
+    el.addEventListener('pointermove', move); el.addEventListener('pointerup', up);
+  });
+  el.addEventListener('dblclick', () => { document.documentElement.style.removeProperty(`--${k}`); try { localStorage.removeItem(`bist-${k}`); } catch { /* ignore */ } placePropsSplit(); cm.refresh(); });
+}
+// The properties panel's resize handle stays fixed on its left edge (the panel scrolls)
+function placePropsSplit() {
+  const r = $('props').getBoundingClientRect();
+  const s = $('splitProps');
+  s.style.display = $('work').classList.contains('noprops') ? 'none' : '';
+  s.style.left = r.left - 4 + 'px'; s.style.top = r.top + 'px'; s.style.height = r.height + 'px'; s.style.bottom = 'auto';
+}
+dragSplit($('splitSide'), 'side-w', 'col', (e) => e.clientX);
+dragSplit($('splitProps'), 'props-w', 'col', (e) => innerWidth - e.clientX);
+dragSplit($('splitAna'), 'ana-h', 'row', (e) => $('main').getBoundingClientRect().bottom - e.clientY);
+for (const k of Object.keys(SIZES)) { try { const v = +localStorage.getItem(`bist-${k}`); if (v) setSize(k, v); } catch { /* ignore */ } }
+new ResizeObserver(placePropsSplit).observe($('props'));
+addEventListener('resize', placePropsSplit);
+
+// ===== Startup =====
+function loadBistLibrary() {
+  const src = bistSource.replace(/import\.meta\.url/g, '""');
+  const out = ts.transpileModule(src, { fileName: 'bist.ts', compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText;
+  const module = { exports: {} };
+  new Function('exports', 'module', 'require', 'process', out)(module.exports, module, () => ({}), undefined);
+  return module.exports;
+}
+async function init() {
+  $('ver').textContent = VERSION_APP;
+  refreshCrumb();
+  if (!ts || !window.CodeMirror) { toast("Couldn't load TypeScript / CodeMirror from cdnjs – check the network and reload", true); return; }
+  bistSource = $('bist-src').textContent.replace(/^\s*\n/, '');
+  if (!bistSource.trim()) { toast('bist.ts is not embedded – run node bist.mjs --embed editor.html', true); return; }
+  try { bistLib = loadBistLibrary(); } catch (e) { toast("Couldn't load the bist.ts library: " + e.message, true); return; }
+  miniLib = bistLib.MINI_LIB ?? '';
+  bistNames = Object.keys(bistLib).filter((k) => !HIDE.has(k) && /^[A-Za-z_$][\w$]*$/.test(k) && k !== 'default' && k !== '__esModule');
+  bistNameSet = new Set(bistNames);
+  prefix = `import { ${bistNames.join(', ')} } from 'flutter_bist';\n`;
+  ls = createLanguageService();
+  $('ver').title = `TypeScript ${ts.version} · BIST schema ${bistLib.SCHEMA}`;
+  const h = await idb.get('file');
+  if (h && h.requestPermission) {
+    lastHandle = h;
+    const b = $('wReopen'); b.innerHTML = icon('file') + '<span></span>'; b.children[1].textContent = `Reopen “${h.name}”`; b.hidden = false; b.onclick = () => reopenFile(h);
+  }
+}
+// Debugging / automated testing: bistEditor.openRoot(json, 'x.bist')
+window.bistEditor = { addFiles, get aiPending() { return aiPending; }, get ai() { return ai; }, aiStream, autoApply, aiSystemPrompt, applyAction, renderChat, get chat() { return chat; }, set chat(v) { chat = v; }, selectPTab, openSearch, runSearch, duplicateLine, closeNode, openFind, closeFind, findMove, replaceOne, replaceAll, undo, redo, openRoot, select, commitEditor, toJson, toMini, nodeCode, evalNodeCode, stepCode, cm, tsHint, validateAll, addNode, moveSel, indentSel, outdentSel, duplicateSel, deleteSel, formatEditor, toggleProps, openNodeMenu, openPlusMenu, get root() { return root; }, get sel() { return sel; } };
+init();
+})();
+</script>
+</body>
+</html>

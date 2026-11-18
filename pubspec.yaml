@@ -1,0 +1,18 @@
+name: flutter_bist
+description: Built-in self-test for Flutter apps – test scripts that run inside the app (real device, release build) and drive the UI like a finger. Includes a script editor.
+version: 0.1.0
+repository: https://github.com/tatthangnt2/flutter_bist
+publish_to: none # remove when publishing to pub.dev
+
+environment:
+  sdk: ">=3.11.0 <4.0.0"
+  flutter: ">=3.41.2"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0

@@ -1,0 +1,17 @@
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  exclude:
+    - tools/editor/node_modules/**
+    - bin/**
+    - build/**
+
+formatter:
+  page_width: 160
+
+linter:
+  rules:
+    prefer_single_quotes: true
+    unawaited_futures: true
+    always_declare_return_types: true
+    curly_braces_in_flow_control_structures: false
