@@ -334,7 +334,7 @@ export function validate(json: Json, fileName?: string): string[] {
   if (json.schema !== SCHEMA) e.push(`schema must be ${SCHEMA}`);
   if (json.type !== 'group' && json.type !== 'sequence') e.push('the root must be a TestGroup / TestSequence');
   if (fileName) {
-    const base = fileName.replace(/^.*[\\/]/, '').replace(/\.(dart|m?[jt]s|json)$/, '');
+    const base = fileName.replace(/^.*[\\/]/, '').replace(/\.(dart|m?[jt]s|json|bist)$/, '');
     if (base !== json.id) e.push(`root id "${json.id}" differs from the file name "${base}"`);
   }
   validateCase(json, 'Root', new Set(), e, true);
