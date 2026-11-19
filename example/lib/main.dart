@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bist/flutter_bist.dart';
-import 'package:flutter_bist/ui.dart';
+import 'package:flutter_bist/bist_view.dart';
 
 /// A tiny app with a login screen and a list – and BIST scripts in assets/bist/ that test it.
 /// Run it, tap the floating "BIST" button, then ▶ a script. Or run a script on start:
@@ -19,7 +19,7 @@ class DemoApp extends StatelessWidget {
   Widget build(BuildContext context) => MaterialApp(
     title: 'BIST demo',
     navigatorObservers: [Bist.navigatorObserver],
-    builder: BistPanel.overlay,
+    builder: BistView.overlay,
     initialRoute: '/login',
     routes: {'/login': (_) => const LoginPage(), '/orders': (_) => const OrdersPage()},
   );

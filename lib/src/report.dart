@@ -3,6 +3,9 @@ part of '../flutter_bist.dart';
 /// Prefix of every result line in the console – agents read them with `adb logcat -d | grep "BIST|"` or `flutter run` output
 const kBistLogPrefix = 'BIST|';
 
+/// Version of the flutter_bist package (same as `version:` in its pubspec.yaml – a test checks it)
+const kBistVersion = '0.1.0';
+
 /// Status of a test in a report
 enum BistStatus {
   none('Not run', Colors.grey),
@@ -96,6 +99,16 @@ class BistReport extends ChangeNotifier {
   BistReport(this.target, this.number);
 
   int count(BistStatus s) => units.where((e) => e.status == s).length;
+
+  /// Share of the tests of [target] that have finished, 0..1 (1 once the run is done) – the progress ring of the BIST button
+  double get progress {
+    if (done) return 1;
+    final c = target;
+    final all = c is TestGroup ? c.units : [if (c is TestUnit) c];
+    if (all.isEmpty) return 0;
+    final finished = all.where((u) => units.any((r) => identical(r.unit, u) && r.status != BistStatus.running)).length;
+    return finished / all.length;
+  }
 
   BistStatus get status {
     if (!done) return BistStatus.running;

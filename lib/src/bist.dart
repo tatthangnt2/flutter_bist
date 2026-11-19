@@ -55,6 +55,9 @@ class Bist extends ChangeNotifier {
   /// Take a screenshot when a step fails / has `shot` (turn off in widget tests: screenshots need real time)
   bool screenshots = true;
 
+  /// Skip the tests that need a tester ([TestUnit.needsTester]: `confirm` / `ask`) – reported as skipped, not run
+  bool skipTester = false;
+
   /// Test running now – logs / errors at this moment belong to it
   final currentUnit = ValueNotifier<TestUnit?>(null);
 

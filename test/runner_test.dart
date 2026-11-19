@@ -67,6 +67,7 @@ void main() {
     Bist.init(provider: _provider);
     _provider.production = false;
     Bist.instance.screenshots = false;
+    Bist.instance.skipTester = false;
     // The runner waits with plain timers; the pump loop in run() moves time forward (no nested tester.pump)
     BistTouch.wait = (d) => Future<void>.delayed(d);
   });
@@ -417,6 +418,44 @@ void main() {
       expect(() => b.expect(text: '([', match: TextMatch.regex), throwsArgumentError);
       expect(() => b.expect(text: 'a', count: -1), throwsArgumentError);
       expect(() => b.expect(route: '/x', checked: true), throwsArgumentError);
+    });
+  });
+
+  group('Tests that need a tester', () {
+    test('needsTester: manual, confirm / ask in steps, loops or the pre / after of a group', () {
+      final manual = TestUnit(name: 'm', manual: 'Face ID');
+      final confirm = TestUnit(name: 'c', steps: [b.confirm('Did it ring?')]);
+      final inLoop = TestUnit(
+        name: 'l',
+        steps: [
+          b.loop(1, 2, [b.ask('code', 'OTP?')]),
+        ],
+      );
+      final plain = TestUnit(name: 'p', steps: [b.wait(1)]);
+      final underPre = TestUnit(name: 'u', steps: [b.wait(1)]);
+      TestGroup(name: 'g', pre: [b.confirm('Ready?')], cases: [underPre]);
+      TestGroup(name: 'root', cases: [manual, confirm, inLoop, plain]);
+      expect([manual, confirm, inLoop, plain, underPre].map((u) => u.needsTester), [true, true, true, false, true]);
+    });
+
+    testWidgets('skipTester: tests with confirm / ask are skipped, the others run', (tester) async {
+      await setUpScreen(tester, const Center(child: Text('Home')));
+      Bist.instance.skipTester = true;
+      final r = await run(
+        tester,
+        TestGroup(
+          name: 'Mixed',
+          cases: [
+            TestUnit(name: 'Asks', steps: [b.confirm('Did it ring?')]),
+            TestUnit(
+              name: 'Plain',
+              steps: [b.expect(text: 'Home', timeout: 500)],
+            ),
+          ],
+        ),
+      );
+      expect(r.units.map((u) => u.status), [BistStatus.skipped, BistStatus.passed]);
+      expect(r.units.first.error, contains('needs a tester'));
     });
   });
 }

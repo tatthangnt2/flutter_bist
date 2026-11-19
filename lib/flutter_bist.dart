@@ -5,7 +5,7 @@
 /// Future<void> main() async {
 ///   WidgetsFlutterBinding.ensureInitialized();
 ///   await Bist.init(scriptAssets: 'assets/bist/'); // provider: MyBistProvider(); runs --dart-define=BIST_RUN_IDS=<id>
-///   runApp(MaterialApp(navigatorObservers: [Bist.navigatorObserver], builder: BistPanel.overlay, home: ...));
+///   runApp(MaterialApp(navigatorObservers: [Bist.navigatorObserver], builder: BistView.overlay, home: ...));
 /// }
 /// ```
 ///

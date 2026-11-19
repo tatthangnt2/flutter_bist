@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128" role="img" aria-labelledby="t">
+  <title id="t">BIST</title>
+  <!-- Icon BIST: chữ B của logo (Roboto Black, Apache 2.0) trong nền tròn -->
+  <defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#68D943"/><stop offset="1" stop-color="#159B55"/></linearGradient></defs>
+  <circle cx="64" cy="64" r="64" fill="#202124"/>
+  <path d="M39.21 96L39.21 32L62.2 32Q74.55 32 80.99 36.53Q87.43 41.05 87.43 49.67Q87.43 54.64 85.14 58.15Q82.86 61.67 78.42 63.34Q83.43 64.66 86.11 68.26Q88.79 71.87 88.79 77.05Q88.79 86.46 82.84 91.19Q76.88 95.91 65.19 96ZM54.64 68.79L54.64 84.13L64.75 84.13Q68.92 84.13 71.16 82.22Q73.41 80.31 73.41 76.84Q73.41 68.84 65.45 68.79ZM54.64 58.68L62.68 58.68Q67.74 58.64 69.89 56.84Q72.04 55.03 72.04 51.52Q72.04 47.47 69.71 45.69Q67.38 43.91 62.2 43.91L54.64 43.91Z" fill="#fff"/>
+  <rect x="54.11" y="68.26" width="19.82" height="16.4" fill="#fff"/><rect x="54.11" y="43.38" width="18.46" height="15.82" fill="#fff"/>
+  <path id="play" d="M54.91 51.9C53.3 50.56 51.42 51.9 51.42 54.59L51.42 73.41C51.42 76.1 53.3 77.44 55.18 76.1L70.24 66.02C72.39 64.67 72.39 61.98 70.24 60.64Z" fill="url(#g)"/>
+</svg>

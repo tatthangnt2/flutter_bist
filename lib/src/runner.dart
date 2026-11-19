@@ -55,6 +55,10 @@ class _BistRun {
       _mark(node, BistStatus.manual, node.manual);
       return true;
     }
+    if (node is TestUnit && bist.skipTester && node.needsTester) {
+      _mark(node, BistStatus.skipped, 'Skipped: needs a tester');
+      return true;
+    }
     if (node is TestUnit) return _execUnit(node);
 
     final g = node as TestGroup;

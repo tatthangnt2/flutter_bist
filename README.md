@@ -37,7 +37,7 @@ dependencies:
 ```dart
 import 'package:flutter/material.dart';
 import 'package:flutter_bist/flutter_bist.dart';
-import 'package:flutter_bist/ui.dart';
+import 'package:flutter_bist/bist_view.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -46,7 +46,7 @@ Future<void> main() async {
   await Bist.init(scriptAssets: 'assets/bist/');
   runApp(MaterialApp(
     navigatorObservers: [Bist.navigatorObserver], // routes for nav / back / route:
-    builder: BistPanel.overlay, // floating "BIST" button → scripts and reports (debug / profile builds)
+    builder: BistView.overlay, // floating "BIST" button → scripts and reports (debug / profile builds)
     routes: {...},
   ));
 }
@@ -141,7 +141,9 @@ flows testers repeat on every build.
 |---|---|
 | `lib/model.dart` | Script model and builders (pure Dart) |
 | `lib/flutter_bist.dart` | `Bist` (runner), `BistProvider`, `BistTouch`, reports |
-| `lib/ui.dart` | `BistPanel`, `BistPanel.overlay` |
+| `lib/bist_view.dart` | `BistView`, `BistView.overlay`, `BistView.units` / `BistView.reports` |
+| `icon/logo.svg`, `icon/icon.svg` | BIST logo (680 × 304) and icon (128 × 128); `BistLogo` / `BistIcon` draw the same in Flutter |
+| `lib/localizations.dart` | `BistLocalizations` (texts of `BistView`), `BistLocalizationsDelegate` – exported by `bist_view.dart` |
 | `tools/editor/` | Sources of the editor and the TS library: `editor.html`, `bist.ts`. `npm run build` writes `bin/` |
 | `bin/` | Built editor (`editor.html`), command line (`bist.mjs`), types (`bist.d.ts`) – committed, CI checks they match the sources |
 | `example/` | Demo app and script |

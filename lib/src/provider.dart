@@ -88,6 +88,12 @@ class BistProvider {
   /// App version `1.2.0+15` for `minVersion` / `maxVersion` (`null` = unknown, every script applies)
   String? get appVersion => null;
 
+  /// App name shown in the [BistView] header (`null` = not shown)
+  String? get appName => null;
+
+  /// Device shown in the [BistView] header, e.g. `Samsung SM-A515F, Android 13` (`null` = the OS name and version)
+  String? get deviceName => null;
+
   /// Environment value for `getEnv` / `{{env:<key>}}`, e.g. `user.name` (`null` = unknown). `Bist.values` is checked first;
   /// secret-looking keys never reach here.
   String? env(String key) => null;
@@ -125,7 +131,7 @@ class BistProvider {
   /// The current server is production – scripts that write data are refused. Default `false`.
   bool get isProduction => false;
 
-  /// Name of the current server (shown in reports)
+  /// Name of the current server (shown in reports and the [BistView] header)
   String? get serverName => null;
 
   /// Switches to server [name] and waits until the app uses it; returns an error message or `null`

@@ -439,6 +439,14 @@ abstract class TestCase {
 class TestUnit extends TestCase {
   final List<TestAction> steps;
 
+  /// A tester has to do something: the test is [manual], or one of its actions (or the `pre` / `after` of its groups)
+  /// is `confirm` / `ask`
+  bool get needsTester {
+    if (manual != null || path.any((c) => c.manual != null)) return true;
+    bool has(List<TestAction> list) => list.any((a) => a.cmd == 'confirm' || a.cmd == 'ask' || has(a.steps));
+    return has(steps) || path.any((c) => has(c.pre) || has(c.after));
+  }
+
   TestUnit({
     required String name,
     String? id,
