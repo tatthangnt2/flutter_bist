@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_bist/flutter_bist.dart';
-import 'package:flutter_bist/bist_view.dart';
 
 /// A tiny app with a login screen and a list – and BIST scripts in assets/bist/ that test it.
 /// Run it, tap the floating "BIST" button, then ▶ a script. Or run a script on start:

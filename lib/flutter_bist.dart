@@ -9,7 +9,7 @@
 /// }
 /// ```
 ///
-/// Scripts (`.bist` / `.json`, see `package:flutter_bist/model.dart` and `bin/editor.html`) are loaded with
+/// Scripts (`.bist` / `.json`, see the script model below and `bin/editor.html`) are loaded with
 /// [Bist.init] (`scriptAssets:`), [Bist.add] / [Bist.loadAssets] and run with [Bist.run] or `--dart-define=BIST_RUN_IDS=<id>`.
 library;
 
@@ -27,17 +27,18 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
 
-import 'model.dart';
+import 'src/model.dart';
 
-// Model classes only – the script builders (`tap`, `expect`, `log`…) live in `package:flutter_bist/model.dart`, so they don't
-// clash with names in your app (or with `expect` of flutter_test)
-export 'model.dart'
-    show TestCase, TestGroup, TestSequence, TestUnit, TestAction, TestVersion, WidgetType, TextMatch, LogLevel, SwipeDirection, kTestScriptSchema;
+// Everything is exported from this library: script model and builders (`tap`, `expect`, `log`…), the UI (`BistView`,
+// `BistLogo`, `BistIcon`, `BistLocalizations`). Test files that also import flutter_test:
+// `import 'package:flutter_bist/flutter_bist.dart' hide expect;` (or a prefix: `as bist` → `bist.expect(...)`).
+export 'src/model.dart';
+export 'src/bist_view.dart';
 
 part 'src/provider.dart';
 part 'src/touch.dart';
-part 'src/report.dart';
+part 'src/result.dart';
 part 'src/bist.dart';
-part 'src/runner.dart';
+part 'src/executor.dart';
 part 'src/widgets.dart';
 part 'src/network.dart';

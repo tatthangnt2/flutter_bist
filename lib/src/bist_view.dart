@@ -6,12 +6,10 @@ library;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
-import 'flutter_bist.dart';
-import 'localizations.dart';
-import 'src/logo.dart';
+import '../flutter_bist.dart';
 
 export 'localizations.dart';
-export 'src/logo.dart' show BistLogo, BistIcon;
+export 'logo.dart' show BistLogo, BistIcon;
 
 const _rowText = TextStyle(fontSize: 13, color: Color(0xFF222222));
 const _subText = TextStyle(fontSize: 11, color: Color(0xFF777777));
@@ -367,7 +365,7 @@ class _ReportsSection extends StatelessWidget {
 /// One run: name; second line "status icon time · duration · counts" (red when a test failed); opens to the tree of the
 /// node that was run.
 class _ReportTile extends StatelessWidget {
-  final BistReport report;
+  final BistResult report;
   final BistLocalizations text;
 
   const _ReportTile({required this.report, required this.text});
@@ -420,7 +418,7 @@ String _duration(Duration d) {
 
 /// Result tree of one run, shaped like the script (the root is the node that was run)
 class _ReportTree {
-  final BistReport report;
+  final BistResult report;
   final BistLocalizations text;
 
   _ReportTree(this.report, this.text);

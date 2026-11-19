@@ -1,7 +1,7 @@
 # Commands
 
 Script JSON `schema: 4`. Builders have the same names in TypeScript (`import … from 'flutter_bist'`, options in an object:
-`tap({ text: 'Send' })`) and Dart (`package:flutter_bist/model.dart`, named parameters: `tap(text: 'Send')`).
+`tap({ text: 'Send' })`) and Dart (`package:flutter_bist/flutter_bist.dart`, named parameters: `tap(text: 'Send')`).
 
 ## Script tree
 

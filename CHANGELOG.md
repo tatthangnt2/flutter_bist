@@ -2,12 +2,18 @@
 
 ## Unreleased
 
+- Breaking: `BistReport` renamed `BistResult` (one run: target, time, tests, status, progress). Sources: `src/report.dart` →
+  `src/result.dart`, `src/runner.dart` → `src/executor.dart` (the runner class is `_BistExecutor`).
+- Breaking: `package:flutter_bist/flutter_bist.dart` is the only public library. It now exports everything: the script
+  model **and builders** (`tap`, `expect`, `log`…; was `package:flutter_bist/model.dart`), `BistView` / `BistLogo` /
+  `BistIcon` (was `bist_view.dart`), `BistLocalizations` (was `localizations.dart`). Test files that also import
+  flutter_test: `import 'package:flutter_bist/flutter_bist.dart' hide expect;` (or a prefix). `doc/` renamed `docs/`.
 - Run dialog: statistics (tests in the node, how many need a tester) and "Skip tests that need a tester"
   (`Bist.skipTester`; `TestUnit.needsTester` = `manual`, or `confirm` / `ask` in its steps / loops / the `pre` / `after`
   of its groups) – skipped tests are reported as Skipped.
 - BIST logo: `icon/logo.svg` and the `BistLogo` widget (drawn from the same paths, no font or asset needed); short icon
   `icon/icon.svg` (the B in a circle) and `BistIcon` – the floating button of `BistView.overlay`, with a progress ring
-  around it while a script runs (`BistReport.progress`: share of the tests finished).
+  around it while a script runs (`BistResult.progress`: share of the tests finished).
 - `BistView` header: BIST logo with the library version (`kBistVersion`), the app name / version / build mode and the
   device (`BistProvider.appName`, `deviceName`, new – default: the OS name), close button. Sections Test data (data and
   files that come with the scripts – coming soon), Test units, Test results (was Test reports).

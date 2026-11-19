@@ -1,4 +1,4 @@
-/// BIST script model – pure Dart (no Flutter import), so scripts can also be written in Dart and printed with `dart run`.
+/// BIST script model – pure Dart (no Flutter import inside), exported by `package:flutter_bist/flutter_bist.dart`.
 ///
 /// A script is a tree: [TestGroup] (children are independent) / [TestSequence] (children run in order) containing
 /// [TestUnit]s (one test with a list of [TestAction]s) or sub-groups. Every node is a [TestCase] with an optional `id`,
@@ -16,7 +16,7 @@
 /// - `inside`: only look inside a block (card, list row, dialog) that contains this text
 ///
 /// ```dart
-/// import 'package:flutter_bist/model.dart';
+/// import 'package:flutter_bist/flutter_bist.dart';
 ///
 /// List<TestAction> login(String user, String pass) => [
 ///   input(user, text: 'Username'),

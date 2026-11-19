@@ -554,7 +554,7 @@
  *   `<id>.ts` → type check → standalone `<id>.mjs` (library embedded) → `node <id>.mjs` prints JSON → validate → `<id>.json` → app.
  *   The app only receives JSON (it never runs downloaded code). Needs the `typescript` package (installed here or globally).
  *
- * The JSON format (schema 4) is identical to the Dart model `package:flutter_bist/model.dart` – the in-app runner reads it with `TestGroup.fromJson`.
+ * The JSON format (schema 4) is identical to the Dart model (`lib/src/model.dart`, exported by `package:flutter_bist/flutter_bist.dart`) – the in-app runner reads it with `TestGroup.fromJson`.
  * When changing commands / validation rules here, change the Dart model too. After editing this file run `npm run build` to regenerate `bin/bist.mjs`, `bin/bist.d.ts`.
  *
  * ```ts

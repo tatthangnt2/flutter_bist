@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_bist/flutter_bist.dart';
+import 'package:flutter_bist/flutter_bist.dart' hide expect;
 import 'package:flutter_test/flutter_test.dart';
 
 /// BistTouch: real pointer events and keyboard input on the running app

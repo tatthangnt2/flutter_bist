@@ -88,7 +88,7 @@ class BistUnitResult extends ChangeNotifier {
 }
 
 /// One run (▶ on a node / `BIST_RUN_IDS`)
-class BistReport extends ChangeNotifier {
+class BistResult extends ChangeNotifier {
   final TestCase target;
   final String number;
   final DateTime time = DateTime.now();
@@ -96,7 +96,7 @@ class BistReport extends ChangeNotifier {
   bool done = false;
   Duration duration = Duration.zero;
 
-  BistReport(this.target, this.number);
+  BistResult(this.target, this.number);
 
   int count(BistStatus s) => units.where((e) => e.status == s).length;
 

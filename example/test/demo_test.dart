@@ -1,6 +1,6 @@
 import 'dart:io';
 
-import 'package:flutter_bist/flutter_bist.dart';
+import 'package:flutter_bist/flutter_bist.dart' hide expect;
 import 'package:flutter_bist_example/main.dart';
 import 'package:flutter_test/flutter_test.dart';
 
@@ -13,7 +13,7 @@ void main() {
     Bist.instance.add(TestGroup.decode(File('assets/bist/demo.json').readAsStringSync()));
     await tester.pumpWidget(const DemoApp());
 
-    BistReport? report;
+    BistResult? report;
     Bist.instance.run(Bist.instance.find('demo')!).then((r) => report = r).ignore();
     final until = DateTime.now().add(const Duration(seconds: 60));
     while (report == null && DateTime.now().isBefore(until)) {

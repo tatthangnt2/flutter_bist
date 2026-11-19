@@ -37,7 +37,6 @@ dependencies:
 ```dart
 import 'package:flutter/material.dart';
 import 'package:flutter_bist/flutter_bist.dart';
-import 'package:flutter_bist/bist_view.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -85,12 +84,12 @@ Three ways to write them – all produce the same JSON (`schema: 4`):
 2. **TypeScript / JavaScript files** – `node bin/bist.mjs <scripts dir> <JSON dir>` type-checks every `<id>.ts`, runs it and
    writes `<id>.json` (needs `npm install` in `tools/editor` once, for the `typescript` package). VS Code completion works
    out of the box (a `tsconfig.json` pointing at `bin/bist.d.ts` is created).
-3. **Dart** – `import 'package:flutter_bist/model.dart';` has the same builders; `script.printJson()` prints the JSON.
+3. **Dart** – `import 'package:flutter_bist/flutter_bist.dart';` has the same builders (in a test file: `hide expect`, it clashes with flutter_test); `script.printJson()` prints the JSON.
 
 Finding widgets: `text` (visible text, input label / hint, tooltip, semantics label), `id` (`ValueKey`), `type`
 (`button`, `input`, `text`, `image`), `icon` (Material icon name), `route`, `inside` (a card / row containing some text),
 `match` (`exact`, `contains`, `regex`). A widget must match **all** given properties; BIST waits, scrolls and closes the
-keyboard while looking for it. Full list of commands: [doc/commands.md](doc/commands.md).
+keyboard while looking for it. Full list of commands: [docs/commands.md](docs/commands.md).
 
 ## Connecting your app: `BistProvider`
 
@@ -111,7 +110,7 @@ class MyBistProvider extends BistProvider {
   String? testData(String group, String field) => testAccounts[group]?[field]; // {{tc:Admin.password}}
 
   @override
-  void attachNetwork(BistNetworkHook hook) => dio.interceptors.insert(0, BistDioInterceptor(hook)); // mockApi / offline (interceptor: doc/provider.md)
+  void attachNetwork(BistNetworkHook hook) => dio.interceptors.insert(0, BistDioInterceptor(hook)); // mockApi / offline (interceptor: docs/provider.md)
 
   @override
   List<String?>? textsOf(Widget w) => w is MyButton ? [w.label] : null; // custom widgets
@@ -120,7 +119,7 @@ class MyBistProvider extends BistProvider {
 await Bist.init(provider: MyBistProvider(), scriptAssets: 'assets/bist/');
 ```
 
-What each group of methods enables, and how to write a network adapter: [doc/provider.md](doc/provider.md).
+What each group of methods enables, and how to write a network adapter: [docs/provider.md](docs/provider.md).
 
 ## Results
 
@@ -139,11 +138,12 @@ flows testers repeat on every build.
 
 | Path | |
 |---|---|
-| `lib/model.dart` | Script model and builders (pure Dart) |
+| `lib/flutter_bist.dart` | The only public library: everything below is exported from it |
+| `lib/src/model.dart` | Script model and builders (pure Dart) |
 | `lib/flutter_bist.dart` | `Bist` (runner), `BistProvider`, `BistTouch`, reports |
-| `lib/bist_view.dart` | `BistView`, `BistView.overlay`, `BistView.units` / `BistView.reports` |
+| `lib/src/bist_view.dart` | `BistView`, `BistView.overlay`, `BistView.units` / `BistView.reports` |
 | `icon/logo.svg`, `icon/icon.svg` | BIST logo (680 × 304) and icon (128 × 128); `BistLogo` / `BistIcon` draw the same in Flutter |
-| `lib/localizations.dart` | `BistLocalizations` (texts of `BistView`), `BistLocalizationsDelegate` – exported by `bist_view.dart` |
+| `lib/src/localizations.dart` | `BistLocalizations` (texts of `BistView`), `BistLocalizationsDelegate` |
 | `tools/editor/` | Sources of the editor and the TS library: `editor.html`, `bist.ts`. `npm run build` writes `bin/` |
 | `bin/` | Built editor (`editor.html`), command line (`bist.mjs`), types (`bist.d.ts`) – committed, CI checks they match the sources |
 | `example/` | Demo app and script |

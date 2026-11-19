@@ -1,4 +1,4 @@
-import 'package:flutter_bist/model.dart';
+import 'package:flutter_bist/flutter_bist.dart';
 import 'package:flutter_test/flutter_test.dart' as t;
 
 List<TestAction> login(String user, String pass) => [

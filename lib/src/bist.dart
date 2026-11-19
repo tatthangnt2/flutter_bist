@@ -2,7 +2,7 @@ part of '../flutter_bist.dart';
 
 /// Loads and runs BIST scripts. Use the single instance: `Bist.instance` (static helpers forward to it).
 ///
-/// Scripts (JSON of `package:flutter_bist/model.dart`, the root is a `TestGroup`) are added with [add] / [loadAssets]; [run]
+/// Scripts (JSON of the script model `src/model.dart`, the root is a `TestGroup`) are added with [add] / [loadAssets]; [run]
 /// runs a node and its preconditions, results go to [reports]. Agents can run scripts without tapping:
 /// `--dart-define=BIST_RUN_IDS=<id or number>[,...]` (debug / profile builds). Every action also prints a `BIST|{...}` line.
 class Bist extends ChangeNotifier {
@@ -44,9 +44,9 @@ class Bist extends ChangeNotifier {
   }
 
   final _scripts = <TestGroup>[];
-  final _reports = <BistReport>[];
+  final _reports = <BistResult>[];
   final _lastStatus = Expando<BistStatus>('bistStatus');
-  _BistRun? _current;
+  _BistExecutor? _current;
 
   /// Values the app declares for `getEnv` / `{{env:<key>}}`, e.g. `Bist.instance.values['user.code'] = () => user.code;`
   /// (checked before [BistProvider.env]). Never declare tokens or passwords.
@@ -65,7 +65,7 @@ class Bist extends ChangeNotifier {
   List<TestGroup> get scripts => List.unmodifiable(_scripts);
 
   /// Runs, newest first
-  List<BistReport> get reports => List.unmodifiable(_reports);
+  List<BistResult> get reports => List.unmodifiable(_reports);
 
   bool get isRunning => _current != null;
 
@@ -178,15 +178,15 @@ class Bist extends ChangeNotifier {
   }
 
   /// Runs [c]: preconditions of its parent groups, the nodes before it inside a `TestSequence`, then [c]
-  Future<BistReport> run(TestCase c) async {
-    final report = BistReport(c, numberOf(c));
+  Future<BistResult> run(TestCase c) async {
+    final report = BistResult(c, numberOf(c));
     if (_current != null) {
       report.done = true;
       _print({'run': report.number, 'ok': false, 'error': 'Another run is in progress'});
       return report;
     }
     _reports.insert(0, report);
-    final r = _current = _BistRun(this, report);
+    final r = _current = _BistExecutor(this, report);
     notifyListeners();
     try {
       await r._exec(c.path.first, c);

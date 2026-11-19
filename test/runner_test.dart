@@ -2,8 +2,8 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_bist/flutter_bist.dart';
-import 'package:flutter_bist/model.dart' as b;
+import 'package:flutter_bist/flutter_bist.dart' hide expect;
+import 'package:flutter_bist/flutter_bist.dart' as b;
 import 'package:flutter_test/flutter_test.dart';
 
 /// Provider of the tests: fake HTTP client, logs, test data, servers, a custom widget
@@ -84,9 +84,9 @@ void main() {
   }
 
   /// Runs [c] (inside a new root group), pumping frames until it ends
-  Future<BistReport> run(WidgetTester tester, TestCase c) async {
+  Future<BistResult> run(WidgetTester tester, TestCase c) async {
     Bist.instance.add(TestGroup(id: 'g${gid++}', name: 'Test group', cases: [c]));
-    BistReport? rs;
+    BistResult? rs;
     Bist.instance.run(c).then((r) => rs = r).ignore();
     // Runner timeouts use real time: pump until done (at most 20 real seconds)
     final until = DateTime.now().add(const Duration(seconds: 20));
@@ -97,10 +97,10 @@ void main() {
     return rs!;
   }
 
-  Future<BistReport> runSteps(WidgetTester tester, List<TestAction> steps, {bool writes = false}) =>
+  Future<BistResult> runSteps(WidgetTester tester, List<TestAction> steps, {bool writes = false}) =>
       run(tester, TestUnit(name: 'Test', steps: steps, writes: writes));
 
-  String? firstError(BistReport r) => r.units.expand((u) => u.steps).where((s) => !s.ok).firstOrNull?.error;
+  String? firstError(BistResult r) => r.units.expand((u) => u.steps).where((s) => !s.ok).firstOrNull?.error;
 
   group('Text match', () {
     testWidgets('contains: part of the text', (tester) async {

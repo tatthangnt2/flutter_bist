@@ -1,9 +1,8 @@
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:flutter_bist/flutter_bist.dart';
-import 'package:flutter_bist/model.dart' as b;
-import 'package:flutter_bist/bist_view.dart';
+import 'package:flutter_bist/flutter_bist.dart' hide expect;
+import 'package:flutter_bist/flutter_bist.dart' as b;
 import 'package:flutter_test/flutter_test.dart';
 
 /// BistView: Test units (long-press → run dialog), Test reports (result tree), BistView.overlay

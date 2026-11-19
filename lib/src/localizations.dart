@@ -1,11 +1,11 @@
 /// Texts of the BIST UI ([BistLocalizations], English by default) and [BistLocalizationsDelegate] to pick them by the app
-/// locale. Exported by `package:flutter_bist/bist_view.dart`.
+/// locale. Exported by `package:flutter_bist/flutter_bist.dart`.
 library;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/widgets.dart';
 
-import 'flutter_bist.dart';
+import '../flutter_bist.dart';
 
 /// Texts of [BistView]. Translate by creating an instance with your texts, then either add a [BistLocalizationsDelegate] to
 /// `MaterialApp.localizationsDelegates` or pass it to [BistView] / [BistView.overlay] (`localizations:`).

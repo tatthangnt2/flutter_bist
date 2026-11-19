@@ -1,9 +1,9 @@
 part of '../flutter_bist.dart';
 
 /// One run
-class _BistRun {
+class _BistExecutor {
   final Bist bist;
-  final BistReport report;
+  final BistResult report;
   final DateTime startTime = DateTime.now();
   final _logs = <BistLog>[];
   void Function()? _stopLogs;
@@ -31,7 +31,7 @@ class _BistRun {
   String? _info;
   String? lastError;
 
-  _BistRun(this.bist, this.report) {
+  _BistExecutor(this.bist, this.report) {
     _stopLogs = _p.listenLogs(_logs.add);
   }
 

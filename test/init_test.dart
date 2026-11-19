@@ -1,8 +1,8 @@
 import 'dart:convert';
 
 import 'package:flutter/services.dart';
-import 'package:flutter_bist/flutter_bist.dart';
-import 'package:flutter_bist/model.dart' as b;
+import 'package:flutter_bist/flutter_bist.dart' hide expect;
+import 'package:flutter_bist/flutter_bist.dart' as b;
 import 'package:flutter_test/flutter_test.dart';
 
 /// Bist.init: provider, scripts from assets, BIST_RUN_IDS auto-run
