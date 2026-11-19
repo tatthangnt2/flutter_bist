@@ -11,7 +11,7 @@ Script JSON `schema: 4`. Builders have the same names in TypeScript (`import …
 | `TestSequence` | Children run in order (they share `{{now}}` and variables); after a failure the rest is skipped. Running one child alone runs the children before it first. `pre` / `after` run once. |
 | `TestUnit` | One test: `steps`, plus its own `pre` / `after`. |
 
-Every node: `name`, `id` (unique, `[A-Za-z0-9._-]`, for `runTest` and `BIST_RUN`), `minVersion` / `maxVersion`
+Every node: `name`, `id` (unique, `[A-Za-z0-9._-]`, for `runTest` and `BIST_RUN_IDS`), `minVersion` / `maxVersion`
 (`1.0.0+10`, outside the range → "Not for this version"), `manual` (reason it can't be automated → "Needs a tester",
 not a failure), `writes` (creates / changes data → refused on production servers).
 

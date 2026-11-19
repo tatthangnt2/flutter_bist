@@ -321,7 +321,7 @@ class TestVersion implements Comparable<TestVersion> {
 abstract class TestCase {
   final String name;
 
-  /// For calling it again (`runTest(id)`) and running it alone (`--dart-define=BIST_RUN=<id>`); unique in the whole tree
+  /// For calling it again (`runTest(id)`) and running it alone (`--dart-define=BIST_RUN_IDS=<id>`); unique in the whole tree
   final String? id;
 
   /// Only runs when the app version is within [minVersion]..[maxVersion] (inclusive, `1.0.0+10`); otherwise "Not applicable"

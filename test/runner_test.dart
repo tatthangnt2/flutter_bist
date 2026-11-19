@@ -344,7 +344,7 @@ void main() {
     });
 
     testWidgets('a feature the app does not support fails with a clear message', (tester) async {
-      Bist.init(); // plain provider: no pickFile
+      await Bist.init(); // plain provider: no pickFile
       await setUpScreen(tester, const Center(child: Text('Home')));
       final r = await runSteps(tester, [b.pickFile('https://example.com/a.pdf')]);
       expect(r.status, BistStatus.failed);

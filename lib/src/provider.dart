@@ -69,7 +69,7 @@ typedef BistNetworkHook = Future<BistMockResult?> Function(String method, Uri ur
 ///   List<String?>? textsOf(Widget w) => w is MyButton ? [w.label] : null;
 /// }
 ///
-/// Bist.init(provider: MyBistProvider());
+/// await Bist.init(provider: MyBistProvider(), scriptAssets: 'assets/bist/');
 /// ```
 class BistProvider {
   BistProvider();
@@ -82,7 +82,7 @@ class BistProvider {
   /// Context for the tester dialogs of `confirm` / `ask` (must be below a Navigator)
   BuildContext? get dialogContext => Bist.navigatorObserver.navigator?.context;
 
-  /// The app is started and shows its first screen – `BIST_RUN` auto runs wait for this
+  /// The app is started and shows its first screen – `BIST_RUN_IDS` auto runs wait for this
   bool get isReady => WidgetsBinding.instance.rootElement != null && Bist.navigatorObserver.navigator != null;
 
   /// App version `1.2.0+15` for `minVersion` / `maxVersion` (`null` = unknown, every script applies)

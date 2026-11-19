@@ -1,17 +1,14 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_bist/flutter_bist.dart';
 import 'package:flutter_bist/ui.dart';
 
 /// A tiny app with a login screen and a list – and BIST scripts in assets/bist/ that test it.
 /// Run it, tap the floating "BIST" button, then ▶ a script. Or run a script on start:
-/// `flutter run --dart-define=BIST_RUN=demo`
+/// `flutter run --dart-define=BIST_RUN_IDS=demo`
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  Bist.init(); // plain Flutter app: the default BistProvider is enough
-  await Bist.instance.loadAssets('assets/bist/');
-  unawaited(Bist.instance.autoRun());
+  // plain Flutter app: the default BistProvider is enough
+  await Bist.init(scriptAssets: 'assets/bist/');
   runApp(const DemoApp());
 }
 

@@ -4,7 +4,7 @@
 Flutter app, or reports "not supported" for features that need app knowledge. Extend it and override what you need:
 
 ```dart
-Bist.init(provider: MyBistProvider());
+await Bist.init(provider: MyBistProvider(), scriptAssets: 'assets/bist/');
 ```
 
 A UI library ships its own provider (extending `BistProvider` with its navigation, HTTP client and widgets); an app using that
@@ -16,7 +16,7 @@ library extends it further (e.g. to add a Dio adapter).
 |---|---|---|
 | `rootContext` | `WidgetsBinding.rootElement` | You render into another root |
 | `dialogContext` | the `Navigator` seen by `Bist.navigatorObserver` | `confirm` / `ask` dialogs need another Navigator |
-| `isReady` | root element and a Navigator exist | `autoRun` must wait for login / splash |
+| `isReady` | root element and a Navigator exist | `runFromEnvironment` (`BIST_RUN_IDS`) must wait for login / splash |
 | `appVersion` | `null` (every script applies) | You use `minVersion` / `maxVersion` – return `'1.2.0+15'` (see `TestVersion.tryFrom`) |
 | `env(key)` | `null` | `getEnv` / `{{env:key}}`: `user.name`, `app.version`… (secret-looking keys never reach you) |
 | `toast(message)` | `SnackBar` | You have your own toast |

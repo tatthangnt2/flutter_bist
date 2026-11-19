@@ -4,15 +4,13 @@
 /// ```dart
 /// Future<void> main() async {
 ///   WidgetsFlutterBinding.ensureInitialized();
-///   Bist.init(); // or Bist.init(provider: MyBistProvider())
-///   await Bist.instance.loadAssets('assets/bist/');
-///   unawaited(Bist.instance.autoRun()); // --dart-define=BIST_RUN=<id>
+///   await Bist.init(scriptAssets: 'assets/bist/'); // provider: MyBistProvider(); runs --dart-define=BIST_RUN_IDS=<id>
 ///   runApp(MaterialApp(navigatorObservers: [Bist.navigatorObserver], builder: BistPanel.overlay, home: ...));
 /// }
 /// ```
 ///
 /// Scripts (`.bist` / `.json`, see `package:flutter_bist/model.dart` and `bin/editor.html`) are loaded with
-/// [Bist.add] / [Bist.loadAssets] and run with [Bist.run] or `--dart-define=BIST_RUN=<id>`.
+/// [Bist.init] (`scriptAssets:`), [Bist.add] / [Bist.loadAssets] and run with [Bist.run] or `--dart-define=BIST_RUN_IDS=<id>`.
 library;
 
 import 'dart:async';

@@ -4,7 +4,7 @@ part of '../flutter_bist.dart';
 ///
 /// Scripts (JSON of `package:flutter_bist/model.dart`, the root is a `TestGroup`) are added with [add] / [loadAssets]; [run]
 /// runs a node and its preconditions, results go to [reports]. Agents can run scripts without tapping:
-/// `--dart-define=BIST_RUN=<id or number>[,...]` (debug / profile builds). Every action also prints a `BIST|{...}` line.
+/// `--dart-define=BIST_RUN_IDS=<id or number>[,...]` (debug / profile builds). Every action also prints a `BIST|{...}` line.
 class Bist extends ChangeNotifier {
   Bist._();
 
@@ -14,14 +14,34 @@ class Bist extends ChangeNotifier {
   /// Tracks routes for the default [BistProvider] – add it to `MaterialApp.navigatorObservers`
   static final navigatorObserver = BistNavigatorObserver();
 
-  /// Ids / numbers to run when the app starts (`--dart-define=BIST_RUN=...`), debug / profile builds only
-  static const autoRunIds = String.fromEnvironment('BIST_RUN');
+  /// Ids / numbers to run when the app starts (`--dart-define=BIST_RUN_IDS=...`), debug / profile builds only
+  // ignore: constant_identifier_names – same name as the --dart-define key
+  static const BIST_RUN_IDS = String.fromEnvironment('BIST_RUN_IDS');
 
   /// Connects BIST to the app; replace it with [init]
   BistProvider provider = BistProvider();
 
-  /// Sets the [provider] (default: plain Flutter app). Load scripts, then call [autoRun] for `--dart-define=BIST_RUN=...`.
-  static void init({BistProvider? provider}) => instance.provider = provider ?? BistProvider();
+  /// Connects BIST to the app and loads its scripts:
+  ///
+  /// - [provider]: how BIST talks to the app (default: plain Flutter app).
+  /// - [scriptAssets]: asset path prefix of the scripts, e.g. `'assets/bist/'` – loads every `*.bist` / `*.json` there
+  ///   ([loadAssets]); `null` loads nothing (add scripts later with [add] / [loadAssets]).
+  /// - [dartDefine]: run the scripts named by `--dart-define=BIST_RUN_IDS=<id or number>[,...]` once the app is ready
+  ///   ([runFromEnvironment], in the background; debug / profile builds only, nothing happens without `BIST_RUN_IDS`).
+  ///
+  /// Completes when the scripts are loaded (not when the auto-run ends), with the number of script files loaded:
+  /// ```dart
+  /// await Bist.init(scriptAssets: 'assets/bist/');
+  /// runApp(const MyApp());
+  /// ```
+  ///
+  /// [bundle] replaces `rootBundle` (tests).
+  static Future<int> init({BistProvider? provider, String? scriptAssets, bool dartDefine = true, AssetBundle? bundle}) async {
+    instance.provider = provider ?? BistProvider();
+    final count = scriptAssets == null ? 0 : await instance.loadAssets(scriptAssets, bundle: bundle);
+    if (dartDefine) unawaited(instance.runFromEnvironment());
+    return count;
+  }
 
   final _scripts = <TestGroup>[];
   final _reports = <BistReport>[];
@@ -132,15 +152,19 @@ class Bist extends ChangeNotifier {
     }
   }
 
-  /// Runs [autoRunIds] (debug / profile builds) once the app shows its first screen
-  Future<void> autoRun({Duration delay = const Duration(seconds: 3)}) async {
-    if (kReleaseMode || autoRunIds.isEmpty) return;
+  bool _runFromEnvironmentStarted = false;
+
+  /// Runs [BIST_RUN_IDS] (debug / profile builds) once the app shows its first screen. Only the first call does anything
+  /// ([init] already calls it unless `dartDefine: false`), so older code that also calls it does not run scripts twice.
+  Future<void> runFromEnvironment({Duration delay = const Duration(seconds: 3)}) async {
+    if (kReleaseMode || BIST_RUN_IDS.isEmpty || _runFromEnvironmentStarted) return;
+    _runFromEnvironmentStarted = true;
     final until = DateTime.now().add(const Duration(minutes: 2));
     while (!provider.isReady && DateTime.now().isBefore(until)) {
       await Future<void>.delayed(const Duration(milliseconds: 300));
     }
     await Future<void>.delayed(delay);
-    for (final id in autoRunIds.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty)) {
+    for (final id in BIST_RUN_IDS.split(',').map((e) => e.trim()).where((e) => e.isNotEmpty)) {
       final c = find(id);
       if (c == null) {
         _print({'run': id, 'ok': false, 'error': 'No such node: $id'});

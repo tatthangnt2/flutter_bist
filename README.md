@@ -35,17 +35,15 @@ dependencies:
 ## Quick start
 
 ```dart
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 import 'package:flutter_bist/flutter_bist.dart';
 import 'package:flutter_bist/ui.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  Bist.init(); // default BistProvider: plain Flutter app
-  await Bist.instance.loadAssets('assets/bist/'); // *.bist / *.json
-  unawaited(Bist.instance.autoRun()); // flutter run --dart-define=BIST_RUN=<id>
+  // default BistProvider (plain Flutter app); loads assets/bist/*.bist / *.json;
+  // runs `flutter run --dart-define=BIST_RUN_IDS=<id>` scripts once the app is ready (dartDefine: false to turn off)
+  await Bist.init(scriptAssets: 'assets/bist/');
   runApp(MaterialApp(
     navigatorObservers: [Bist.navigatorObserver], // routes for nav / back / route:
     builder: BistPanel.overlay, // floating "BIST" button → scripts and reports (debug / profile builds)
@@ -119,7 +117,7 @@ class MyBistProvider extends BistProvider {
   List<String?>? textsOf(Widget w) => w is MyButton ? [w.label] : null; // custom widgets
 }
 
-Bist.init(provider: MyBistProvider());
+await Bist.init(provider: MyBistProvider(), scriptAssets: 'assets/bist/');
 ```
 
 What each group of methods enables, and how to write a network adapter: [doc/provider.md](doc/provider.md).
@@ -128,7 +126,7 @@ What each group of methods enables, and how to write a network adapter: [doc/pro
 
 - **Panel**: reports per run, per test, per step (command, time, error, texts on screen when it failed, app errors).
 - **Console**: every step prints a `BIST|{...}` JSON line – `adb logcat -d | grep "BIST|"` or the `flutter run` output –
-  so an AI agent can run a script with `--dart-define=BIST_RUN=<id>` and read the result without a screenshot.
+  so an AI agent can run a script with `--dart-define=BIST_RUN_IDS=<id>` and read the result without a screenshot.
 - **Screenshots** of failed steps (and steps with `shot: true`) in `BistProvider.tempDir()/bist`.
 
 ## Limits

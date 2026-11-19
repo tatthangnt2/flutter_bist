@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- `Bist.init({provider, scriptAssets, dartDefine = true})` now also loads the scripts under `scriptAssets` and starts the
+  `--dart-define=BIST_RUN_IDS=...` auto-run; it returns a `Future<int>` (script files loaded). Replaces
+  `Bist.init()` + `loadAssets(...)` + `unawaited(autoRun())`.
+- Breaking: `autoRun()` renamed `runFromEnvironment()`, `autoRunIds` renamed `BIST_RUN_IDS` (same name as the define), and the define is now
+  `--dart-define=BIST_RUN_IDS=<id or number>[,...]` (was `BIST_RUN`). `runFromEnvironment()` runs only on its first call,
+  so calling it again after `init` does not run scripts twice.
+
 ## 0.1.0
 
 First release, split out of an in-house Flutter library.

@@ -113,7 +113,7 @@ export interface FieldState {
 /** Properties shared by every node in the tree */
 export interface CaseProps {
     name: string;
-    /** For calling it again (`runTest(id)`) and running it alone (`BIST_RUN=<id>`); unique across all files */
+    /** For calling it again (`runTest(id)`) and running it alone (`BIST_RUN_IDS=<id>`); unique across all files */
     id?: string;
     /** App version range `1.0.0+10` (inclusive) */
     minVersion?: string;
@@ -299,7 +299,7 @@ export declare const toRootJson: (root: TestGroupNode) => {
     type: "group" | "sequence";
     cases: TestCaseNode[];
     name: string;
-    /** For calling it again (`runTest(id)`) and running it alone (`BIST_RUN=<id>`); unique across all files */
+    /** For calling it again (`runTest(id)`) and running it alone (`BIST_RUN_IDS=<id>`); unique across all files */
     id?: string;
     /** App version range `1.0.0+10` (inclusive) */
     minVersion?: string;

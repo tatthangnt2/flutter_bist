@@ -658,7 +658,7 @@ export interface FieldState {
 /** Properties shared by every node in the tree */
 export interface CaseProps {
   name: string;
-  /** For calling it again (`runTest(id)`) and running it alone (`BIST_RUN=<id>`); unique across all files */
+  /** For calling it again (`runTest(id)`) and running it alone (`BIST_RUN_IDS=<id>`); unique across all files */
   id?: string;
   /** App version range `1.0.0+10` (inclusive) */
   minVersion?: string;
@@ -1646,7 +1646,7 @@ function renderProps() {
   f.innerHTML = `
     <label>Type<select id="p-type" ${n.type === 'unit' ? 'disabled' : ''}>${typeOpts}</select></label>
     <label>${isRoot ? 'Project name' : 'Name'} *<input type="text" id="p-name"></label>
-    <label>Id${isRoot ? ' *' : ''}<input type="text" id="p-id" placeholder="e.g. login.ql – for runTest('…') / BIST_RUN"><span class="field-err" id="e-id"></span></label>
+    <label>Id${isRoot ? ' *' : ''}<input type="text" id="p-id" placeholder="e.g. login.ql – for runTest('…') / BIST_RUN_IDS"><span class="field-err" id="e-id"></span></label>
     <div class="row2">
       <label>Min version<input type="text" id="p-minVersion" placeholder="1.0.0+10"></label>
       <label>Max version<input type="text" id="p-maxVersion" placeholder="2.0.0"></label>

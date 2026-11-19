@@ -84,7 +84,7 @@ class BistUnitResult extends ChangeNotifier {
   }
 }
 
-/// One run (▶ on a node / `BIST_RUN`)
+/// One run (▶ on a node / `BIST_RUN_IDS`)
 class BistReport extends ChangeNotifier {
   final TestCase target;
   final String number;
