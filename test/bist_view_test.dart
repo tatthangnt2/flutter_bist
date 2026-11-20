@@ -5,46 +5,46 @@ import 'package:flutter_bist/flutter_bist.dart' hide expect;
 import 'package:flutter_bist/flutter_bist.dart' as b;
 import 'package:flutter_test/flutter_test.dart';
 
-/// BistView: Test units (long-press → run dialog), Test reports (result tree), BistView.overlay
+/// BistView: Test units (long-press → run dialog), Test results (result tree), BistView.overlay
 void main() {
   var gid = 0;
 
   setUp(() async {
     await Bist.init(dartDefine: false);
     Bist.instance.clear();
-    Bist.instance.clearReports();
+    Bist.instance.clearResults();
     Bist.instance.screenshots = false; // screenshots need real time – they hang in widget tests
     BistTouch.wait = (d) => Future<void>.delayed(d);
   });
 
-  TestGroup script() => TestGroup(
+  BistSuite script() => BistSuite(
     id: 'ui${gid++}',
     name: 'Login',
-    cases: [
-      TestGroup(
+    units: [
+      BistSuite(
         name: 'Account',
-        cases: [
-          TestUnit(name: 'Empty fields', steps: [b.wait(50)]),
-          TestUnit(
+        units: [
+          BistCase(name: 'Empty fields', steps: [b.wait(50)]),
+          BistCase(
             name: 'Wrong password',
             steps: [b.expect(text: 'Not on screen', timeout: 200)],
           ),
         ],
       ),
-      TestUnit(name: 'Fingerprint', manual: 'Face ID'),
+      BistCase(name: 'Fingerprint', manual: 'Face ID'),
     ],
   );
 
   Future<void> waitDone(WidgetTester tester) async {
     final until = DateTime.now().add(const Duration(seconds: 20));
-    while (Bist.instance.reports.isEmpty || !Bist.instance.reports.first.done) {
+    while (Bist.instance.results.isEmpty || !Bist.instance.results.first.done) {
       if (DateTime.now().isAfter(until)) fail('the run did not finish');
       await tester.pump(const Duration(milliseconds: 50));
     }
     await tester.pumpAndSettle();
   }
 
-  testWidgets('long-press opens the run dialog; Run calls onRun and adds a report with the result tree', (tester) async {
+  testWidgets('long-press opens the run dialog; Run calls onRun and adds a run with its result tree', (tester) async {
     Bist.instance.add(script());
     var runs = 0;
     await tester.pumpWidget(
@@ -62,13 +62,13 @@ void main() {
     await tester.tap(find.text('Run'));
     await waitDone(tester);
     expect(runs, 1);
-    expect(Bist.instance.reports, hasLength(1));
+    expect(Bist.instance.results, hasLength(1));
 
     final error = tester.widget<Text>(find.textContaining('Not found: text "Not on screen"'));
     expect(error.style?.color, Colors.red);
     expect(find.byIcon(Icons.check_circle), findsOneWidget); // 1.1.1 passed
     expect(find.text('Face ID'), findsOneWidget); // needs a tester
-    expect(tester.widget<Text>(find.text('1. Login').last).style?.color, Colors.red); // report header
+    expect(tester.widget<Text>(find.text('1. Login').last).style?.color, Colors.red); // result header
     expect(tester.widget<Text>(find.text('1.1. Account').last).style?.color, Colors.red); // group with a failed test
   });
 
@@ -93,7 +93,7 @@ void main() {
 
   testWidgets('texts come from BistLocalizations', (tester) async {
     Bist.instance.add(script());
-    const text = BistLocalizations(units: 'Kịch bản', reports: 'Kết quả', noReports: 'Chưa chạy');
+    const text = BistLocalizations(units: 'Kịch bản', results: 'Kết quả', noResults: 'Chưa chạy');
     await tester.pumpWidget(
       const MaterialApp(
         home: Scaffold(body: BistView(localizations: text)),
@@ -107,7 +107,7 @@ void main() {
   testWidgets('BistLocalizationsDelegate: texts by the app language, the fallback (English) for other languages', (tester) async {
     Bist.instance.add(script());
     // The test has no flutter_localizations, so the app stays in English: map 'en' to other texts to see the delegate work
-    const custom = BistLocalizations(units: 'Kịch bản', reports: 'Kết quả', title: 'KIỂM THỬ');
+    const custom = BistLocalizations(units: 'Kịch bản', results: 'Kết quả', title: 'KIỂM THỬ');
     Future<void> pump(Map<String, BistLocalizations> translations) => tester.pumpWidget(
       MaterialApp(
         localizationsDelegates: [BistLocalizationsDelegate(translations), DefaultMaterialLocalizations.delegate, DefaultWidgetsLocalizations.delegate],
@@ -141,7 +141,7 @@ void main() {
     );
     expect(find.byType(BistIcon), findsOneWidget);
     expect(find.byType(CircularProgressIndicator), findsNothing);
-    Bist.instance.run(Bist.instance.scripts.first.cases.first).ignore(); // group "Account": 2 tests
+    Bist.instance.run(Bist.instance.scripts.first.units.first).ignore(); // group "Account": 2 tests
     await tester.pump(const Duration(milliseconds: 20));
     double? ring() => tester.widget<CircularProgressIndicator>(find.byType(CircularProgressIndicator)).value;
     expect(ring(), 0, reason: 'nothing finished yet');

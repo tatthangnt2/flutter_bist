@@ -2,8 +2,8 @@ part of '../flutter_bist.dart';
 
 /// Loads and runs BIST scripts. Use the single instance: `Bist.instance` (static helpers forward to it).
 ///
-/// Scripts (JSON of the script model `src/model.dart`, the root is a `TestGroup`) are added with [add] / [loadAssets]; [run]
-/// runs a node and its preconditions, results go to [reports]. Agents can run scripts without tapping:
+/// Scripts (JSON of the script model `src/unit.dart`, the root is a `BistSuite`) are added with [add] / [loadAssets]; [run]
+/// runs a node and its preconditions, results go to [results]. Agents can run scripts without tapping:
 /// `--dart-define=BIST_RUN_IDS=<id or number>[,...]` (debug / profile builds). Every action also prints a `BIST|{...}` line.
 class Bist extends ChangeNotifier {
   Bist._();
@@ -43,8 +43,8 @@ class Bist extends ChangeNotifier {
     return count;
   }
 
-  final _scripts = <TestGroup>[];
-  final _reports = <BistResult>[];
+  final _scripts = <BistSuite>[];
+  final _results = <BistResult>[];
   final _lastStatus = Expando<BistStatus>('bistStatus');
   _BistExecutor? _current;
 
@@ -55,24 +55,24 @@ class Bist extends ChangeNotifier {
   /// Take a screenshot when a step fails / has `shot` (turn off in widget tests: screenshots need real time)
   bool screenshots = true;
 
-  /// Skip the tests that need a tester ([TestUnit.needsTester]: `confirm` / `ask`) – reported as skipped, not run
+  /// Skip the tests that need a tester ([BistCase.needsTester]: `confirm` / `ask`) – reported as skipped, not run
   bool skipTester = false;
 
   /// Test running now – logs / errors at this moment belong to it
-  final currentUnit = ValueNotifier<TestUnit?>(null);
+  final currentCase = ValueNotifier<BistCase?>(null);
 
   /// Roots of the loaded scripts (one per script file)
-  List<TestGroup> get scripts => List.unmodifiable(_scripts);
+  List<BistSuite> get scripts => List.unmodifiable(_scripts);
 
   /// Runs, newest first
-  List<BistResult> get reports => List.unmodifiable(_reports);
+  List<BistResult> get results => List.unmodifiable(_results);
 
   bool get isRunning => _current != null;
 
   void _changed() => notifyListeners();
 
   /// Adds a script tree (replaces the one with the same root id)
-  void add(TestGroup root) {
+  void add(BistSuite root) {
     final i = _scripts.indexWhere((e) => e.id == root.id);
     if (i >= 0) {
       _scripts[i] = root;
@@ -88,9 +88,9 @@ class Bist extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Removes every report
-  void clearReports() {
-    _reports.clear();
+  /// Removes every result
+  void clearResults() {
+    _results.clear();
     notifyListeners();
   }
 
@@ -103,7 +103,7 @@ class Bist extends ChangeNotifier {
     final keys = manifest.listAssets().where((k) => k.startsWith(prefix) && (k.endsWith('.bist') || k.endsWith('.json'))).toList()..sort();
     for (final key in keys) {
       try {
-        add(TestGroup.decode(await b.loadString(key)));
+        add(BistSuite.decode(await b.loadString(key)));
         count++;
       } catch (e) {
         debugPrint('[BIST] Skipped $key: $e');
@@ -113,7 +113,7 @@ class Bist extends ChangeNotifier {
   }
 
   /// Node with [idOrNumber] (an id, or a number like `2.1.3` – numbers of the n-th root start with n)
-  TestCase? find(String idOrNumber) {
+  BistUnit? find(String idOrNumber) {
     for (final g in _scripts) {
       final rs = g.findId(idOrNumber);
       if (rs != null) return rs;
@@ -126,16 +126,16 @@ class Bist extends ChangeNotifier {
   }
 
   /// Number of [c] in the list of scripts (the n-th root → `n`, children → `n.1.2`)
-  String numberOf(TestCase c) {
+  String numberOf(BistUnit c) {
     final root = c.path.first;
-    final i = _scripts.indexOf(root as TestGroup) + 1;
+    final i = _scripts.indexOf(root as BistSuite) + 1;
     return c.number.isEmpty ? '$i' : '$i.${c.number}';
   }
 
-  /// Status of the last run of [c] (a test, or a group: failed if a child failed)
-  BistStatus lastStatus(TestCase c) {
-    if (c is TestUnit) return _lastStatus[c] ?? BistStatus.none;
-    final all = (c as TestGroup).units.map(lastStatus).toList();
+  /// Status of the last run of [c] (a test, or a suite: failed if a child failed)
+  BistStatus lastStatus(BistUnit c) {
+    if (c is BistCase) return _lastStatus[c] ?? BistStatus.none;
+    final all = (c as BistSuite).cases.map(lastStatus).toList();
     if (all.any((e) => e == BistStatus.running)) return BistStatus.running;
     if (all.any((e) => e.isFailure)) return BistStatus.failed;
     if (all.isNotEmpty && all.every((e) => e == BistStatus.passed || e == BistStatus.manual || e == BistStatus.notApplicable)) {
@@ -177,44 +177,90 @@ class Bist extends ChangeNotifier {
     }
   }
 
-  /// Runs [c]: preconditions of its parent groups, the nodes before it inside a `TestSequence`, then [c]
-  Future<BistResult> run(TestCase c) async {
-    final report = BistResult(c, numberOf(c));
+  /// Runs [c]: preconditions of its parent groups, the nodes before it inside a `BistSequence`, then [c]
+  Future<BistResult> run(BistUnit c) async {
+    final result = BistResult(c.path.first, numberOf(c.path.first), target: c);
+    result.node(c, numberOf).fill(numberOf);
     if (_current != null) {
-      report.done = true;
-      _print({'run': report.number, 'ok': false, 'error': 'Another run is in progress'});
-      return report;
+      result.done = true;
+      _print({'run': numberOf(c), 'ok': false, 'error': 'Another run is in progress'});
+      return result;
     }
-    _reports.insert(0, report);
-    final r = _current = _BistExecutor(this, report);
+    _results.insert(0, result);
+    final r = _current = _BistExecutor(this, result);
     notifyListeners();
     try {
+      await r.open();
       await r._exec(c.path.first, c);
     } finally {
       r.close();
       _current = null;
-      currentUnit.value = null;
+      currentCase.value = null;
     }
-    report
+    result
       ..done = true
-      ..duration = DateTime.now().difference(report.time)
+      ..duration = DateTime.now().difference(result.time)
       ..changed();
     _print({
-      'run': report.number,
+      'run': numberOf(c),
       'name': c.name,
       'done': true,
-      'status': report.status.name,
+      'status': result.status.name,
       for (final s in BistStatus.values)
-        if (report.count(s) > 0) s.name: report.count(s),
-      'ms': report.duration.inMilliseconds,
+        if (s != BistStatus.none && result.count(s) > 0) s.name: result.count(s),
+      'ms': result.duration.inMilliseconds,
+      'dir': ?result.dir,
       if (r.unusedFiles > 0) 'warn': '${r.unusedFiles} pickFile file(s) never used (no file picker opened after them)',
     });
     notifyListeners();
-    return report;
+    return result;
   }
 
   static void _print(Map<String, Object?> line) {
     // ignore: avoid_print
     print('$kBistLogPrefix${jsonEncode(line)}');
   }
+}
+
+/// App version `versionName+versionCode`, e.g. `1.0.21+146` (without `+code` only versionName is compared)
+class TestVersion implements Comparable<TestVersion> {
+  final List<int> name;
+  final int? code;
+
+  const TestVersion(this.name, [this.code]);
+
+  static final _pattern = RegExp(r'^(\d+)\.(\d+)\.(\d+)(?:\+(\d+))?$');
+
+  static bool isValid(String s) => _pattern.hasMatch(s);
+
+  /// Reads `1.0.0+10`; throws [FormatException] when invalid
+  factory TestVersion.parse(String s) {
+    final m = _pattern.firstMatch(s.trim());
+    if (m == null) throw FormatException('Version must look like 1.0.0+10: "$s"');
+    return TestVersion([int.parse(m[1]!), int.parse(m[2]!), int.parse(m[3]!)], m[4] == null ? null : int.parse(m[4]!));
+  }
+
+  /// Reads a version from an app's version name / code (e.g. `1.2.0-beta` + `15`), `null` if it can't
+  static TestVersion? tryFrom(String? versionName, [Object? versionCode]) {
+    if (versionName == null) return null;
+    final name = versionName.split(RegExp(r'[^0-9.]')).first;
+    try {
+      return TestVersion.parse(versionCode == null ? name : '$name+$versionCode');
+    } on FormatException {
+      return null;
+    }
+  }
+
+  @override
+  int compareTo(TestVersion o) {
+    for (var i = 0; i < 3; i++) {
+      final c = name[i].compareTo(o.name[i]);
+      if (c != 0) return c;
+    }
+    if (code == null || o.code == null) return 0;
+    return code!.compareTo(o.code!);
+  }
+
+  @override
+  String toString() => '${name.join('.')}${code == null ? '' : '+$code'}';
 }

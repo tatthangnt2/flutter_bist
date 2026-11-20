@@ -16,17 +16,17 @@ class BistLocalizations {
   const BistLocalizations({
     this.title = 'BIST',
     this.units = 'Test units',
-    this.reports = 'Test results',
+    this.results = 'Test results',
     this.data = 'Test data',
     this.noData = 'Data and files that come with the scripts – coming soon',
     this.noScripts = 'No scripts – Bist.init(scriptAssets: ...) / Bist.instance.add(...)',
-    this.noReports = 'No runs yet – long-press a script to run it',
+    this.noResults = 'No runs yet – long-press a script to run it',
     this.sequential = 'sequential',
     this.writes = '✎ writes data',
     this.needsTester = 'needs a tester',
     this.notApplicable = 'not for this version',
-    this.group = 'Group',
-    this.sequence = 'Sequential group',
+    this.suite = 'Suite',
+    this.sequence = 'Sequential suite',
     this.test = 'Test',
     this.tests = _tests,
     this.writesInfo = 'writes data – runs on non-production servers only',
@@ -46,19 +46,17 @@ class BistLocalizations {
     this.runningUnit = 'Running…',
     this.waiting = 'waiting',
     this.notReached = 'not reached',
-    this.appErrors = 'App errors',
-    this.screen = 'Screen',
-    this.shot = 'Screenshot',
+    this.folder = 'Folder',
     this.status = _status,
   });
 
-  final String title, units, reports, data, noData, noScripts, noReports;
+  final String title, units, results, data, noData, noScripts, noResults;
 
   /// Tags after a script name
   final String sequential, writes, needsTester, notApplicable;
 
   /// Run dialog
-  final String group, sequence, test, writesInfo, screenshotOnFailure, skipTester, cancel, run, runAll, busy, close;
+  final String suite, sequence, test, writesInfo, screenshotOnFailure, skipTester, cancel, run, runAll, busy, close;
 
   /// Statistics line of the run dialog: tests in the node, how many need a tester
   final String Function(int total, int tester) stats;
@@ -67,8 +65,8 @@ class BistLocalizations {
   final String Function(String? min, String? max) versions;
   final String Function(String version) notForVersion;
 
-  /// Reports
-  final String today, inProgress, runningUnit, waiting, notReached, appErrors, screen, shot;
+  /// Results
+  final String today, inProgress, runningUnit, waiting, notReached, folder;
   final String Function(BistStatus s) status;
 
   static String _tests(int n) => n == 1 ? '1 test' : '$n tests';

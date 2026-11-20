@@ -1,11 +1,11 @@
 {
   "schema": 4,
-  "type": "group",
+  "type": "suite",
   "id": "demo",
   "name": "Demo app",
-  "cases": [
+  "units": [
     {
-      "type": "group",
+      "type": "suite",
       "id": "login",
       "name": "Login",
       "pre": [
@@ -14,9 +14,9 @@
           "path": "/login"
         }
       ],
-      "cases": [
+      "units": [
         {
-          "type": "unit",
+          "type": "case",
           "id": "login.empty",
           "name": "Missing fields",
           "steps": [
@@ -42,7 +42,7 @@
           ]
         },
         {
-          "type": "unit",
+          "type": "case",
           "id": "login.wrong",
           "name": "Wrong password",
           "steps": [
@@ -73,9 +73,9 @@
       "type": "sequence",
       "id": "orders",
       "name": "Orders",
-      "cases": [
+      "units": [
         {
-          "type": "unit",
+          "type": "case",
           "id": "orders.open",
           "name": "Sign in",
           "steps": [
@@ -106,7 +106,7 @@
           ]
         },
         {
-          "type": "unit",
+          "type": "case",
           "id": "orders.add",
           "name": "Add an order",
           "steps": [

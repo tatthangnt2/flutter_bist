@@ -19,20 +19,21 @@ class _W {
   /// Visible text of a `Text` widget (also used for "inside" and screen dumps)
   static String? textOf(Widget w) => w is Text ? (w.data ?? w.textSpan?.toPlainText()) : null;
 
-  static bool isButton(Widget w) =>
-      _p.isButton(w) ??
-      (w is ButtonStyleButton ||
-          w is IconButton ||
-          w is FloatingActionButton ||
-          w is CupertinoButton ||
-          (w is InkWell && (w.onTap != null || w.onLongPress != null)) ||
-          (w is GestureDetector && (w.onTap != null || w.onLongPress != null)));
+  static WidgetType? widgetOf(Widget w) => _p.widgetOf(w);
 
-  static bool isInput(Widget w) => _p.isInput(w) ?? (w is TextField || w is EditableText);
+  static bool isButton(Widget w) => widgetOf(w) == WidgetType.button;
 
-  static bool isImage(Widget w) => _p.isImage(w) ?? (w is Image || w is Icon);
+  static bool isInput(Widget w) => widgetOf(w) == WidgetType.input;
 
-  static bool isDropdown(Widget w) => _p.isDropdown(w) ?? w is DropdownButton;
+  static bool isImage(Widget w) => widgetOf(w) == WidgetType.image;
+
+  static bool isDropdown(Widget w) => widgetOf(w) == WidgetType.dropdown;
+
+  /// Where `input` types / picks: a text input or a dropdown
+  static bool isField(Widget w) => switch (widgetOf(w)) {
+    WidgetType.input || WidgetType.dropdown => true,
+    _ => false,
+  };
 
   static bool? isEnabled(Widget w) =>
       _p.isEnabled(w) ??

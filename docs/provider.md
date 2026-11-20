@@ -20,7 +20,7 @@ library extends it further (e.g. to add a Dio adapter).
 | `appVersion` | `null` (every script applies) | You use `minVersion` / `maxVersion` – return `'1.2.0+15'` (see `TestVersion.tryFrom`) |
 | `env(key)` | `null` | `getEnv` / `{{env:key}}`: `user.name`, `app.version`… (secret-looking keys never reach you) |
 | `toast(message)` | `SnackBar` | You have your own toast |
-| `tempDir()` | `Directory.systemTemp` | Screenshots / sample files should go elsewhere (e.g. `path_provider`) |
+| `tempDir()` | `Directory.systemTemp` | Result folders (`bist/<run time>/<test number>/`: logs, error, screenshots) and sample files – should go elsewhere (e.g. `path_provider`) |
 
 `Bist.instance.values['key'] = () => value;` is checked before `env` – handy for a few app values without a provider.
 Built-in keys: `route`, `app.version`, `server.name`.
@@ -44,7 +44,7 @@ With go_router / beamer / auto_route, override `currentRoute` and `go` with the 
 | `serverName` | `null` |
 | `switchServer(name, timeout)` (`server`) | not supported |
 
-A script (or group) with `writes: true` creates or changes data: BIST refuses to run its steps while `isProduction` is
+A script (or suite) with `writes: true` creates or changes data: BIST refuses to run its steps while `isProduction` is
 true. Return `true` when you aren't sure.
 
 ## Test data, logs
@@ -52,7 +52,7 @@ true. Return `true` when you aren't sure.
 | Method | Used by |
 |---|---|
 | `testData(group, field)` | `{{tc:<group>.<field>}}` – test accounts and other data kept out of scripts |
-| `listenLogs(onLog)` → stop function | `expectLog`, app errors in reports (`BistLog` with `level: 'error'`) |
+| `listenLogs(onLog)` → stop function | `expectLog`, app errors in Test results (`BistLog` with `level: 'error'`) |
 | `logHistory` | `getLog` also searches logs written before the run |
 
 `BistLog(tag, level:, time:, data:)` – `tag` is the searchable text (e.g. `POST /api/login`), `data` any Map / List /
@@ -114,16 +114,27 @@ plugin dependencies, so this is up to your provider (e.g. replace `ImagePickerPl
 
 ## Custom widgets
 
-Each method returns `null` for "not my widget" – then the built-in Material / Cupertino rules decide.
+`widgetOf(w)` returns the kind of widget (`WidgetType`, `null` = none) – its default knows the Material / Cupertino
+widgets, so override it for your widgets and fall back to `super.widgetOf(w)`:
+
+```dart
+@override
+WidgetType? widgetOf(Widget w) => switch (w) {
+  PrimaryButton() => WidgetType.button,
+  InputText() => WidgetType.input,
+  SvgPicture() => WidgetType.image,
+  InputDropdown() => WidgetType.dropdown,
+  _ => super.widgetOf(w),
+};
+```
+
+The other methods return `null` for "not my widget" – then the built-in Material / Cupertino rules decide.
 
 | Method | Used for |
 |---|---|
 | `textsOf(w)` | texts that find the widget: a button that draws an icon but has a label, an input with its own label |
-| `isButton(w)` | `type: button`, finding the button around a text / icon |
-| `isInput(w)` | `type: input`, the input next to a label |
-| `isImage(w)` | `type: image` (e.g. `SvgPicture`) |
+| `widgetOf(w)` | `type: button / input / text / image / checkbox / radio / dropdown`, the button around a text / icon, the input next to a label, the dropdown of `input(value)` |
 | `isEnabled(w)` | `expect(enabled: true)` |
 | `checkedOf(w)` / `selectedOf(w)` | `expect(checked: …)` / `expect(selected: …)` |
-| `isDropdown(w)` | `input(value)` taps it, then the item with that text |
 | `enterText(field, value)` | `input` into a field that needs special handling – return a Future (error or `null`) |
 | `inputDate(field, text, date, end:)` | `inputDate` / `inputDateRange` into your date fields |

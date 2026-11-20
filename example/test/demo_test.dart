@@ -10,17 +10,17 @@ void main() {
     Bist.init();
     Bist.instance.screenshots = false;
     BistTouch.wait = (d) => Future<void>.delayed(d);
-    Bist.instance.add(TestGroup.decode(File('assets/bist/demo.json').readAsStringSync()));
+    Bist.instance.add(BistSuite.decode(File('assets/bist/demo.json').readAsStringSync()));
     await tester.pumpWidget(const DemoApp());
 
-    BistResult? report;
-    Bist.instance.run(Bist.instance.find('demo')!).then((r) => report = r).ignore();
+    BistResult? result;
+    Bist.instance.run(Bist.instance.find('demo')!).then((r) => result = r).ignore();
     final until = DateTime.now().add(const Duration(seconds: 60));
-    while (report == null && DateTime.now().isBefore(until)) {
+    while (result == null && DateTime.now().isBefore(until)) {
       await tester.pump(const Duration(milliseconds: 50));
     }
-    final failed = report!.units.expand((u) => u.steps).where((s) => !s.ok).map((s) => '${s.label} ${s.cmd}: ${s.error}');
-    expect(report!.status, BistStatus.passed, reason: failed.join('\n'));
-    expect(report!.units.length, 4);
+    final failed = result!.cases.where((u) => u.status.isFailure).map((u) => '${u.number} ${u.unit.name}: ${u.error} (${u.dir})');
+    expect(result!.status, BistStatus.passed, reason: failed.join('\n'));
+    expect(result!.cases.length, 4);
   });
 }

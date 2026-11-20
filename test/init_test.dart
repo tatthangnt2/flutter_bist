@@ -9,11 +9,11 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  String script(String id) => TestGroup(
+  String script(String id) => BistSuite(
     id: id,
     name: id,
-    cases: [
-      TestUnit(name: 'a', steps: [b.wait(1)]),
+    units: [
+      BistCase(name: 'a', steps: [b.wait(1)]),
     ],
   ).encode();
 

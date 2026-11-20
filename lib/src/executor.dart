@@ -3,7 +3,7 @@ part of '../flutter_bist.dart';
 /// One run
 class _BistExecutor {
   final Bist bist;
-  final BistResult report;
+  final BistResult result;
   final DateTime startTime = DateTime.now();
   final _logs = <BistLog>[];
   void Function()? _stopLogs;
@@ -11,12 +11,15 @@ class _BistExecutor {
 
   BistProvider get _p => bist.provider;
 
-  /// Results of a group's `pre` actions, waiting for the next test
-  final _pending = <BistStepResult>[];
-  BistUnitResult? _unit;
+  /// Folder of this run (see [BistResult.dir]); `null`: no files written
+  Directory? _runDir;
+
+  /// Log lines and screenshots of a suite's `pre` actions, waiting for the next test's folder
+  final _pendingLines = <(String, String)>[];
+  final _pendingShots = <(String, File)>[];
+  BistResult? _case;
   String _phase = 'step';
   DateTime _prevStepStart = DateTime.now();
-  int _shotIndex = 0;
 
   /// Variables of `randInt` / `randText` / `loop` / `get*` (`{{name}}`, `{{i}}`)
   final _vars = <String, String>{};
@@ -27,12 +30,80 @@ class _BistExecutor {
   int unusedFiles = 0;
   bool _pickUsed = false;
 
-  /// Extra info about the action just run (e.g. a generated value), shown in the report
+  /// Extra info about the action just run (e.g. a generated value), shown in Test results and the logs
   String? _info;
   String? lastError;
 
-  _BistExecutor(this.bist, this.report) {
+  _BistExecutor(this.bist, this.result) {
     _stopLogs = _p.listenLogs(_logs.add);
+  }
+
+  /// Creates the folder of this run: `tempDir/bist/<yyyy-MM-dd HH-mm-ss>` (` (2)`… when it exists)
+  Future<void> open() async {
+    try {
+      final t = result.time;
+      final base =
+          '${(await _p.tempDir()).path}/bist/${t.year}-${_two(t.month)}-${_two(t.day)} '
+          '${_two(t.hour)}-${_two(t.minute)}-${_two(t.second)}';
+      var dir = Directory(base);
+      for (var i = 2; dir.existsSync(); i++) {
+        dir = Directory('$base ($i)');
+      }
+      dir.createSync(recursive: true);
+      _runDir = dir;
+      result.dir = dir.path;
+    } catch (e) {
+      debugPrint('[BIST] cannot create the result folder: $e');
+    }
+  }
+
+  /// Folder of [r] (created on first use)
+  Directory? _caseDir(BistResult r) {
+    final run = _runDir;
+    if (run == null) return null;
+    final dir = Directory('${run.path}/${r.number}');
+    if (r.dir == null) {
+      try {
+        dir.createSync(recursive: true);
+        r.dir = dir.path;
+      } catch (_) {
+        return null;
+      }
+    }
+    return dir;
+  }
+
+  /// Appends [line] to `<phase>.log` of [r]
+  void _write(BistResult r, String phase, String line) {
+    final dir = _caseDir(r);
+    if (dir == null) return;
+    try {
+      File('${dir.path}/$phase.log').writeAsStringSync('$line\n', mode: FileMode.append, flush: true);
+    } catch (_) {}
+  }
+
+  /// Writes `error.log` of [r] (only the error)
+  void _writeError(BistResult r) {
+    final dir = _caseDir(r);
+    if (dir == null || r.error == null) return;
+    try {
+      File('${dir.path}/error.log').writeAsStringSync('${r.error}\n', flush: true);
+    } catch (_) {}
+  }
+
+  /// Moves what a suite's `pre` left (log lines, screenshots) into the folder of [r]
+  void _flushPending(BistResult r) {
+    for (final (phase, line) in _pendingLines) {
+      _write(r, phase, line);
+    }
+    _pendingLines.clear();
+    final dir = _caseDir(r);
+    for (final (name, file) in _pendingShots) {
+      try {
+        if (dir != null) file.renameSync('${dir.path}/$name');
+      } catch (_) {}
+    }
+    _pendingShots.clear();
   }
 
   void close() {
@@ -44,7 +115,7 @@ class _BistExecutor {
   // ==== Tree ====
 
   /// Runs [node] (limited to [target] when [target] is inside it). Returns false when a test failed.
-  Future<bool> _exec(TestCase node, TestCase? target) async {
+  Future<bool> _exec(BistUnit node, BistUnit? target) async {
     final full = target == null || identical(node, target);
     final scopeTarget = full ? null : target;
     if (_version != null && !node.appliesTo(_version)) {
@@ -55,21 +126,21 @@ class _BistExecutor {
       _mark(node, BistStatus.manual, node.manual);
       return true;
     }
-    if (node is TestUnit && bist.skipTester && node.needsTester) {
+    if (node is BistCase && bist.skipTester && node.needsTester) {
       _mark(node, BistStatus.skipped, 'Skipped: needs a tester');
       return true;
     }
-    if (node is TestUnit) return _execUnit(node);
+    if (node is BistCase) return _execCase(node);
 
-    final g = node as TestGroup;
-    var scope = g.cases;
+    final g = node as BistSuite;
+    var scope = g.units;
     if (scopeTarget != null) {
-      final i = g.cases.indexWhere((x) => identical(x, scopeTarget) || scopeTarget.path.any((p) => identical(p, x)));
-      scope = g is TestSequence ? g.cases.sublist(0, i + 1) : [g.cases[i]];
+      final i = g.units.indexWhere((x) => identical(x, scopeTarget) || scopeTarget.path.any((p) => identical(p, x)));
+      scope = g is BistSequence ? g.units.sublist(0, i + 1) : [g.units[i]];
     }
-    TestCase? childTarget(TestCase c) => identical(c, scope.last) ? scopeTarget : null;
+    BistUnit? childTarget(BistUnit c) => identical(c, scope.last) ? scopeTarget : null;
 
-    if (g is TestSequence) {
+    if (g is BistSequence) {
       if (!await _actions(g.pre, g, 'pre')) {
         for (final c in scope) {
           _mark(c, BistStatus.preFailed, lastError);
@@ -102,14 +173,12 @@ class _BistExecutor {
     return ok;
   }
 
-  Future<bool> _execUnit(TestUnit u) async {
-    final r = _unit = BistUnitResult(u, bist.numberOf(u), BistStatus.running)..steps.addAll(_pending);
-    _pending.clear();
-    report.units.add(r);
-    report.changed();
+  Future<bool> _execCase(BistCase u) async {
+    final r = _case = result.node(u, bist.numberOf)..status = BistStatus.running;
+    _flushPending(r);
     bist._lastStatus[u] = BistStatus.running;
     bist._changed();
-    bist.currentUnit.value = u;
+    bist.currentCase.value = u;
     final start = DateTime.now();
 
     var status = BistStatus.passed;
@@ -118,32 +187,39 @@ class _BistExecutor {
     } else if (!await _actions(u.steps, u, 'step')) {
       status = BistStatus.failed;
     }
-    if (status != BistStatus.passed) r.error = lastError;
+    if (status != BistStatus.passed) {
+      r.error = lastError;
+      _writeError(r);
+    }
     await _actions(u.after, u, 'after', always: true);
 
     r
       ..duration = DateTime.now().difference(start)
       ..status = status;
+    Bist._print({'case': r.number, 'name': u.name, 'status': status.name, 'error': ?r.error, 'dir': ?r.dir});
     bist._lastStatus[u] = status;
-    bist.currentUnit.value = null;
-    report.changed();
+    bist.currentCase.value = null;
+    result.changed();
     bist._changed();
     return !status.isFailure;
   }
 
   /// Sets the status of every test in [c] (without running them)
-  void _mark(TestCase c, BistStatus status, String? reason) {
-    for (final u in c is TestUnit ? [c] : (c as TestGroup).units) {
-      final r = BistUnitResult(u, bist.numberOf(u), status)..error = reason;
-      report.units.add(r);
+  void _mark(BistUnit c, BistStatus status, String? reason) {
+    for (final u in c is BistCase ? [c] : (c as BistSuite).cases) {
+      final r = result.node(u, bist.numberOf)
+        ..error = reason
+        ..status = status;
       bist._lastStatus[u] = status;
-      Bist._print({'unit': r.number, 'name': u.name, 'status': status.name, 'reason': ?reason});
+      if (_pendingLines.isNotEmpty || _pendingShots.isNotEmpty) _flushPending(r);
+      if (status.isFailure) _writeError(r);
+      Bist._print({'case': r.number, 'name': u.name, 'status': status.name, 'reason': ?reason, 'dir': ?r.dir});
     }
-    report.changed();
+    result.changed();
   }
 
   /// Runs the actions in order, stops at a failing one ([always]: runs them all – cleanup). True when all passed.
-  Future<bool> _actions(List<TestAction> list, TestCase owner, String phase, {bool always = false}) async {
+  Future<bool> _actions(List<BistAction> list, BistUnit owner, String phase, {bool always = false}) async {
     final old = _phase;
     _phase = phase;
     var ok = true;
@@ -157,13 +233,13 @@ class _BistExecutor {
     return ok;
   }
 
-  /// Runs [c] inside a `runTest` action (no separate test row in the report)
-  Future<bool> _execInline(TestCase c, String prefix, int depth) async {
+  /// Runs [c] inside a `runTest` action (no separate test row in Test results)
+  Future<bool> _execInline(BistUnit c, String prefix, int depth) async {
     if (c.manual != null) {
       lastError = 'runTest: "${c.name}" needs a tester (${c.manual})';
       return false;
     }
-    Future<bool> run(List<TestAction> list, String phase, {bool always = false}) async {
+    Future<bool> run(List<BistAction> list, String phase, {bool always = false}) async {
       var ok = true;
       for (var i = 0; i < list.length; i++) {
         final rs = await _runStep(c, list[i], '$prefix$phase${i + 1}', depth);
@@ -173,27 +249,27 @@ class _BistExecutor {
       return ok;
     }
 
-    if (c is TestUnit) {
+    if (c is BistCase) {
       final ok = await run(c.pre, 'pre') && await run(c.steps, '');
       await run(c.after, 'after', always: true);
       return ok;
     }
-    final g = c as TestGroup;
+    final g = c as BistSuite;
     var ok = true;
-    if (g is TestSequence && !await run(g.pre, 'pre')) return false;
-    for (var i = 0; i < g.cases.length && (ok || g is! TestSequence); i++) {
-      if (g is! TestSequence && !await run(g.pre, 'pre')) {
+    if (g is BistSequence && !await run(g.pre, 'pre')) return false;
+    for (var i = 0; i < g.units.length && (ok || g is! BistSequence); i++) {
+      if (g is! BistSequence && !await run(g.pre, 'pre')) {
         ok = false;
         continue;
       }
-      ok = await _execInline(g.cases[i], '$prefix${i + 1}.', depth) && ok;
-      if (g is! TestSequence) await run(g.after, 'after', always: true);
+      ok = await _execInline(g.units[i], '$prefix${i + 1}.', depth) && ok;
+      if (g is! BistSequence) await run(g.after, 'after', always: true);
     }
-    if (g is TestSequence) await run(g.after, 'after', always: true);
+    if (g is BistSequence) await run(g.after, 'after', always: true);
     return ok;
   }
 
-  Future<bool> _runStep(TestCase owner, TestAction step, String label, int depth, {bool nested = false}) async {
+  Future<bool> _runStep(BistUnit owner, BistAction step, String label, int depth, {bool nested = false}) async {
     final start = DateTime.now();
     final logStart = _prevStepStart;
     _prevStepStart = start;
@@ -223,31 +299,33 @@ class _BistExecutor {
     }
 
     final newErrors = _logs.where((e) => e.isError).skip(errorCount).map((e) => e.tag).toSet().take(5).toList();
-    final shotPath = bist.screenshots && (error != null || step.shot) ? await _shot(bist.numberOf(owner), label) : null;
     final screen = error != null && step.cmd != 'runTest' ? _screenTexts() : const <String>[];
-    final result = BistStepResult(
-      phase: _phase,
-      label: label,
-      cmd: [step.describe(), ?_info].join(' → '),
-      ok: error == null,
-      ms: DateTime.now().difference(start).inMilliseconds,
-      error: error,
-      shot: shotPath,
-      screen: screen,
-      appErrors: newErrors,
-    );
-    // A group's pre: attached to the next test; anything else: the test running / just run
-    if (_unit == null || (owner is TestGroup && _phase == 'pre')) {
-      _pending.add(result);
+    final cmd = [step.describe(), ?_info].join(' → ');
+    // Step id in the file names / log lines: `2`, `1` (of pre1), `2.1.3` (inside runTest); a suite's actions: `<suite>_<n>`
+    var id = _phase != 'step' && label.startsWith(_phase) ? label.substring(_phase.length) : label;
+    if (owner is BistSuite) id = '${bist.numberOf(owner)}_$id';
+    // A suite's pre: goes to the next test; anything else: the test running / just run
+    final target = _case == null || (owner is BistSuite && _phase == 'pre') ? null : _case;
+    final shotName = 'shot_${_phase}_$id.jpg';
+    final shotPath = bist.screenshots && (error != null || step.shot) ? await _shot(target, shotName) : null;
+    final line = [
+      '$id ${error == null ? '✓' : '✗'} $cmd',
+      if (step.note != null) '   note: ${step.note}',
+      if (error != null) '   → $error',
+      if (newErrors.isNotEmpty) '   app errors: ${newErrors.join(', ')}',
+      if (screen.isNotEmpty) '   screen: ${screen.join(' | ')}',
+      if (shotPath != null) '   shot: $shotName',
+    ].join('\n');
+    if (target == null) {
+      _pendingLines.add((_phase, line));
     } else {
-      _unit!.steps.add(result);
+      _write(target, _phase, line);
     }
     Bist._print({
       'unit': bist.numberOf(owner),
       'step': label,
-      'cmd': result.cmd,
-      'ok': result.ok,
-      'ms': result.ms,
+      'cmd': cmd,
+      'ok': error == null,
       'error': ?error,
       'note': ?step.note,
       if (newErrors.isNotEmpty) 'appErrors': newErrors,
@@ -267,7 +345,7 @@ class _BistExecutor {
     return false;
   }
 
-  Future<String?> _runTest(TestAction step, String label, int depth) async {
+  Future<String?> _runTest(BistAction step, String label, int depth) async {
     final c = bist.find(step.script!);
     if (c == null) return 'No test: ${step.script}';
     if (depth >= 3) return 'runTest nested more than 3 levels: ${step.script}';
@@ -277,7 +355,7 @@ class _BistExecutor {
 
   // ==== Commands ====
 
-  Future<String?> _exec1(TestAction step, DateTime logStart) async {
+  Future<String?> _exec1(BistAction step, DateTime logStart) async {
     final timeout = Duration(milliseconds: step.timeout ?? 5000);
     final q = _Query.of(step, _value);
     switch (step.cmd) {
@@ -464,7 +542,7 @@ class _BistExecutor {
   }
 
   /// Date fields are app-specific: [BistProvider.inputDate] sets the value; a plain text input gets the text typed
-  Future<String?> _inputDate(_Query q, TestAction step, Duration timeout) async {
+  Future<String?> _inputDate(_Query q, BistAction step, Duration timeout) async {
     final (field, err) = await _find(q, timeout, hittable: false, input: true);
     if (field == null) return err;
     final range = step.cmd == 'inputDateRange';
@@ -544,7 +622,7 @@ class _BistExecutor {
   }
 
   /// Tester dialog: `confirm` (Yes / No) or `ask` (type a value, saved to a variable)
-  Future<String?> _askTester(TestAction step, Duration timeout) async {
+  Future<String?> _askTester(BistAction step, Duration timeout) async {
     final context = _p.dialogContext;
     if (context == null) return 'No Navigator to show the dialog (add Bist.navigatorObserver or override BistProvider.dialogContext)';
     final isAsk = step.cmd == 'ask';
@@ -552,12 +630,12 @@ class _BistExecutor {
     final message = _value(step.message!);
     final yes = step.yes ?? 'Yes', no = step.no ?? 'No';
     var open = true;
-    Bist._print({'unit': _unit?.number, 'waiting': step.cmd, 'message': message});
+    Bist._print({'case': _case?.number, 'waiting': step.cmd, 'message': message});
     final answer = showDialog<String>(
       context: context,
       barrierDismissible: false,
       builder: (c) => AlertDialog(
-        title: Text('BIST · ${_unit?.number ?? report.number}', style: const TextStyle(fontSize: 14, color: Colors.grey)),
+        title: Text('BIST · ${_case?.number ?? result.number}', style: const TextStyle(fontSize: 14, color: Colors.grey)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
@@ -596,15 +674,15 @@ class _BistExecutor {
     return _setVar(step, rs);
   }
 
-  String? _setVar(TestAction step, String v) {
+  String? _setVar(BistAction step, String v) {
     final value = step.format == null ? v : _value(step.format!).replaceAll('{value}', v);
     _vars[step.name!] = value;
     _info = '{{${step.name}}} = "$value"';
     return null;
   }
 
-  /// `loop` / `loopWhile`: runs the child actions, each one is written to the report
-  Future<String?> _loop(TestCase owner, TestAction step, String label, int depth) async {
+  /// `loop` / `loopWhile`: runs the child actions, each one is written to the log
+  Future<String?> _loop(BistUnit owner, BistAction step, String label, int depth) async {
     if (step.cmd == 'loop') {
       final from = step.from!, to = step.to!;
       final dir = to >= from ? 1 : -1;
@@ -682,7 +760,7 @@ class _BistExecutor {
 
   /// expect / notExpect with `count`: number of matching widgets on screen (meeting the state conditions) equals / differs
   /// from `count`, waiting up to [timeout]
-  Future<String?> _waitCount(_Query q, TestAction step, Duration timeout, {required bool equal}) async {
+  Future<String?> _waitCount(_Query q, BistAction step, Duration timeout, {required bool equal}) async {
     final want = step.count!;
     final state = _stateCheck(step);
     final end = DateTime.now().add(timeout);
@@ -698,7 +776,7 @@ class _BistExecutor {
   }
 
   /// Extra conditions of expect / notExpect (enabled, value, focused, obscured, maxLength, checked, selected); `null` if none
-  bool Function(Element e)? _stateCheck(TestAction step) {
+  bool Function(Element e)? _stateCheck(BistAction step) {
     final value = step.fieldValue == null ? null : _value(step.fieldValue!);
     final noField = value == null && step.focused == null && step.obscured == null && step.maxLength == null;
     if (!step.enabled && noField && step.checked == null && step.selected == null) return null;
@@ -863,8 +941,9 @@ class _BistExecutor {
   static bool _isType(Element e, WidgetType type) => switch (type) {
     WidgetType.button => _buttonOf(e) != null,
     WidgetType.input => _ancestorOrSelf(e, _W.isInput) != null,
-    WidgetType.text => e.widget is Text,
+    WidgetType.text => _W.widgetOf(e.widget) == WidgetType.text,
     WidgetType.image => _W.isImage(e.widget),
+    WidgetType.checkbox || WidgetType.radio || WidgetType.dropdown => _ancestorOrSelf(e, (w) => _W.widgetOf(w) == type, levels: 40) != null,
   };
 
   /// [e] is inside a close block (up to 10 levels) that contains text [text] – card / list row / dialog
@@ -932,7 +1011,7 @@ class _BistExecutor {
     var covered = false;
     while (true) {
       var all = _match(q);
-      if (input) all = all.map((e) => _W.isInput(e.widget) ? e : (_inputNear(e) ?? e)).toSet().toList();
+      if (input) all = all.map((e) => _W.isField(e.widget) ? e : (_inputNear(e) ?? e)).toSet().toList();
       final list = _visible(all, hittable: hittable);
       covered = all.isNotEmpty && list.isEmpty;
       if (list.isNotEmpty) {
@@ -975,9 +1054,9 @@ class _BistExecutor {
     if (r == null) return null;
     Element? best;
     var bestD = 160.0;
-    bool insideCustomInput(Element e) => _ancestorOrSelf(e, (w) => w is! EditableText && w is! TextField && _W.isInput(w), levels: 12) != null;
+    bool insideCustomInput(Element e) => _ancestorOrSelf(e, (w) => w is! EditableText && w is! TextField && _W.isField(w), levels: 12) != null;
     final candidates = _all(
-      (e) => (_W.isInput(e.widget) && e.widget is! EditableText && e.widget is! TextField) || (e.widget is EditableText && !insideCustomInput(e)),
+      (e) => (_W.isField(e.widget) && e.widget is! EditableText && e.widget is! TextField) || (e.widget is EditableText && !insideCustomInput(e)),
     );
     for (final e in candidates) {
       final f = BistTouch.rectOf(e);
@@ -1060,8 +1139,9 @@ class _BistExecutor {
     return rs;
   }
 
-  /// Screenshot into [BistProvider.tempDir]`/bist`, returns the path (`null` if it can't)
-  Future<String?> _shot(String number, String label) async {
+  /// JPEG screenshot `<folder of [r]>/<name>` (no test yet – a suite's `pre`: the run folder, moved later). Returns the
+  /// path (`null` if it can't).
+  Future<String?> _shot(BistResult? r, String name) async {
     try {
       RenderRepaintBoundary? boundary;
       void visit(RenderObject o) {
@@ -1077,14 +1157,21 @@ class _BistExecutor {
         v.visitChildren(visit);
       }
       if (boundary == null || boundary!.debugNeedsPaint) return null;
+      final dir = r == null ? _runDir : _caseDir(r);
+      if (dir == null) return null;
       final image = await boundary!.toImage(pixelRatio: 1);
-      final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-      if (bytes == null) return null;
-      final dir = Directory('${(await _p.tempDir()).path}/bist');
-      await dir.create(recursive: true);
-      final file = File('${dir.path}/${number}_${label.replaceAll('.', '-')}_${_shotIndex++}.png');
-      await file.writeAsBytes(bytes.buffer.asUint8List());
-      return file.path;
+      final rgba = await image.toByteData(format: ui.ImageByteFormat.rawRgba);
+      final (w, h) = (image.width, image.height);
+      image.dispose();
+      if (rgba == null) return null;
+      final jpg = await compute(_encodeJpg, (rgba.buffer.asUint8List(), w, h));
+      var file = File('${dir.path}/$name');
+      if (r == null) {
+        file = File('${dir.path}/.pending_${_pendingShots.length}_$name');
+        _pendingShots.add((name, file));
+      }
+      file.writeAsBytesSync(jpg, flush: true);
+      return r == null ? name : file.path;
     } catch (_) {
       return null;
     }
@@ -1139,7 +1226,7 @@ class _Query {
     TextMatch.regex => _re!.hasMatch(s),
   };
 
-  factory _Query.of(TestAction s, String Function(String) value) => _Query(
+  factory _Query.of(BistAction s, String Function(String) value) => _Query(
     text: s.text == null ? null : value(s.text!),
     id: s.id == null ? null : value(s.id!),
     type: s.type,
@@ -1159,4 +1246,11 @@ class _Query {
     if (route != null) 'route $route',
     if (inside != null) 'inside "$inside"',
   ].join(' ');
+}
+
+/// RGBA → JPEG (in an isolate: encoding takes ~100 ms)
+Uint8List _encodeJpg((Uint8List, int, int) a) {
+  final (bytes, w, h) = a;
+  final image = img.Image.fromBytes(width: w, height: h, bytes: bytes.buffer, numChannels: 4, order: img.ChannelOrder.rgba);
+  return img.encodeJpg(image, quality: 80);
 }

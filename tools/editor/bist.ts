@@ -1,17 +1,17 @@
 /**
  * BIST – write, check, bundle and export test scripts in TypeScript. A single file:
- * - **Script-writing library**: `import { TestGroup, TestUnit, tap, expect, … } from 'flutter_bist'` (resolves to this file / `bist.mjs`).
+ * - **Script-writing library**: `import { BistSuite, BistCase, tap, expect, … } from 'flutter_bist'` (resolves to this file / `bist.mjs`).
  * - **Tools**: `transpile`, `typecheck`, `bundleMjs` (shared by `editor.html` and the command line).
  * - **Editor page**: `npm run build` (in tools/editor) embeds this file into `bin/editor.html` – opens with a double click.
  * - **Export from the command line**: `node bin/bist.mjs <scripts dir> <JSON dir> [--mjs <dir>]`:
  *   `<id>.ts` → type check → standalone `<id>.mjs` (library embedded) → `node <id>.mjs` prints JSON → validate → `<id>.json` → app.
  *   The app only receives JSON (it never runs downloaded code). Needs the `typescript` package (installed here or globally).
  *
- * The JSON format (schema 4) is identical to the Dart model (`lib/src/model.dart`, exported by `package:flutter_bist/flutter_bist.dart`) – the in-app runner reads it with `TestGroup.fromJson`.
+ * The JSON format (schema 4) is identical to the Dart model (`lib/src/unit.dart` + `lib/src/action.dart`, exported by `package:flutter_bist/flutter_bist.dart`) – the in-app runner reads it with `BistSuite.fromJson`.
  * When changing commands / validation rules here, change the Dart model too. After editing this file run `npm run build` to regenerate `bin/bist.mjs`, `bin/bist.d.ts`.
  *
  * ```ts
- * import { TestGroup, TestUnit, WidgetType, input, tap, expect, printJson } from 'flutter_bist';
+ * import { BistSuite, BistCase, WidgetType, input, tap, expect, printJson } from 'flutter_bist';
  *
  * const login = (user: string, pass: string) => [
  *   input(user, { text: 'Username' }),
@@ -19,8 +19,8 @@
  *   tap({ text: 'SIGN IN', type: WidgetType.button }),
  * ];
  *
- * printJson(TestGroup({ id: 'login', name: 'Login', cases: [
- *   TestUnit({ name: 'Missing fields', steps: [...login('', ''), expect({ text: 'Please enter your username and password.' })] }),
+ * printJson(BistSuite({ id: 'login', name: 'Login', units: [
+ *   BistCase({ name: 'Missing fields', steps: [...login('', ''), expect({ text: 'Please enter your username and password.' })] }),
  * ] }));
  * ```
  */
@@ -35,7 +35,8 @@ export const SCHEMA = 4;
 
 // ==== Types ====
 
-export const WidgetType = { button: 'button', input: 'input', text: 'text', image: 'image' } as const;
+/** Kind of widget for `type:` (`checkbox` also covers switches) */
+export const WidgetType = { button: 'button', input: 'input', text: 'text', image: 'image', checkbox: 'checkbox', radio: 'radio', dropdown: 'dropdown' } as const;
 export type WidgetType = (typeof WidgetType)[keyof typeof WidgetType];
 
 export const LogLevel = { debug: 'debug', info: 'info', warn: 'warn', error: 'error', damage: 'damage', success: 'success' } as const;
@@ -53,7 +54,7 @@ const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
 export type SwipeDirection = (typeof SwipeDirection)[keyof typeof SwipeDirection];
 
 /** One action (step) – the JSON sent to the app */
-export interface TestAction {
+export interface BistAction {
   readonly cmd: string;
   readonly [key: string]: unknown;
 }
@@ -80,12 +81,12 @@ export interface Find {
 export interface Opt {
   /** Timeout (ms), default 5000 */
   timeout?: number;
-  /** Note shown in the report */
+  /** Note shown in Test results and the logs */
   note?: string;
   /** Take a screenshot at this step (failed steps always take one) */
   shot?: boolean;
   /** Actions to run when the step fails; if they all pass, the run continues (one level only) */
-  onError?: TestAction[];
+  onError?: BistAction[];
 }
 
 /** Extra conditions for expect / notExpect */
@@ -109,7 +110,7 @@ export interface FieldState {
 }
 
 /** Properties shared by every node in the tree */
-export interface CaseProps {
+export interface UnitProps {
   name: string;
   /** For calling it again (`runTest(id)`) and running it alone (`BIST_RUN_IDS=<id>`); unique across all files */
   id?: string;
@@ -120,22 +121,22 @@ export interface CaseProps {
   manual?: string;
   /** Creates / changes data – only runs on non-Production servers */
   writes?: boolean;
-  /** Setup / cleanup (TestGroup: around each child; TestSequence: once) */
-  pre?: TestAction[];
-  after?: TestAction[];
+  /** Setup / cleanup (BistSuite: around each child; BistSequence: once) */
+  pre?: BistAction[];
+  after?: BistAction[];
 }
 
-export interface TestUnitNode extends CaseProps {
-  readonly type: 'unit';
-  steps: TestAction[];
+export interface BistCaseNode extends UnitProps {
+  readonly type: 'case';
+  steps: BistAction[];
 }
 
-export interface TestGroupNode extends CaseProps {
-  readonly type: 'group' | 'sequence';
-  cases: TestCaseNode[];
+export interface BistSuiteNode extends UnitProps {
+  readonly type: 'suite' | 'sequence';
+  units: BistUnitNode[];
 }
 
-export type TestCaseNode = TestUnitNode | TestGroupNode;
+export type BistUnitNode = BistCaseNode | BistSuiteNode;
 
 // ==== Command table (same as `_fields` in the Dart model) ====
 
@@ -291,12 +292,12 @@ const VERSION = /^(\d+)\.(\d+)\.(\d+)(?:\+(\d+))?$/;
 
 function validateCase(raw: unknown, p: string, ids: Set<string>, e: string[], root = false): void {
   if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
-    e.push(`${p}: must be a TestUnit / TestGroup / TestSequence`);
+    e.push(`${p}: must be a BistCase / BistSuite / BistSequence`);
     return;
   }
   const c = raw as Json;
   const where = typeof c.name === 'string' ? `${p} "${c.name}"` : p;
-  if (!['unit', 'group', 'sequence'].includes(c.type as string)) e.push(`${where}: type must be unit | group | sequence`);
+  if (!['case', 'suite', 'sequence'].includes(c.type as string)) e.push(`${where}: type must be case | suite | sequence`);
   if (typeof c.name !== 'string' || !c.name.trim()) e.push(`${where}: name is required`);
   if (c.id != null) {
     if (typeof c.id !== 'string' || !/^[A-Za-z0-9._-]+$/.test(c.id)) e.push(`${where}: id may only contain letters, digits, . _ -`);
@@ -306,7 +307,7 @@ function validateCase(raw: unknown, p: string, ids: Set<string>, e: string[], ro
   for (const k of ['minVersion', 'maxVersion']) if (c[k] != null && (typeof c[k] !== 'string' || !VERSION.test(c[k] as string))) e.push(`${where}: ${k} must look like 1.0.0+10`);
   if (c.manual != null && typeof c.manual !== 'string') e.push(`${where}: manual must be a string (the reason)`);
   if (c.writes != null && typeof c.writes !== 'boolean') e.push(`${where}: writes must be true | false`);
-  const allowed = ['type', 'id', 'name', 'minVersion', 'maxVersion', 'manual', 'writes', 'pre', 'after', ...(root ? ['schema'] : []), c.type === 'unit' ? 'steps' : 'cases'];
+  const allowed = ['type', 'id', 'name', 'minVersion', 'maxVersion', 'manual', 'writes', 'pre', 'after', ...(root ? ['schema'] : []), c.type === 'case' ? 'steps' : 'units'];
   for (const k of Object.keys(c)) if (!allowed.includes(k)) e.push(`${where}: unknown field "${k}"`);
   const actions = (k: string, required = false) => {
     const list = c[k];
@@ -320,11 +321,11 @@ function validateCase(raw: unknown, p: string, ids: Set<string>, e: string[], ro
   };
   actions('pre');
   actions('after');
-  if (c.type === 'unit') actions('steps', true);
-  else if (c.type === 'group' || c.type === 'sequence') {
-    const cases = c.cases;
-    if (!Array.isArray(cases) || !cases.length) e.push(`${where}: cases needs at least 1 item`);
-    else cases.forEach((x, i) => validateCase(x, `${p}.${i + 1}`.replace('Root.', ''), ids, e));
+  if (c.type === 'case') actions('steps', true);
+  else if (c.type === 'suite' || c.type === 'sequence') {
+    const units = c.units;
+    if (!Array.isArray(units) || !units.length) e.push(`${where}: units needs at least 1 item`);
+    else units.forEach((x, i) => validateCase(x, `${p}.${i + 1}`.replace('Root.', ''), ids, e));
   }
 }
 
@@ -332,7 +333,7 @@ function validateCase(raw: unknown, p: string, ids: Set<string>, e: string[], ro
 export function validate(json: Json, fileName?: string): string[] {
   const e: string[] = [];
   if (json.schema !== SCHEMA) e.push(`schema must be ${SCHEMA}`);
-  if (json.type !== 'group' && json.type !== 'sequence') e.push('the root must be a TestGroup / TestSequence');
+  if (json.type !== 'suite' && json.type !== 'sequence') e.push('the root must be a BistSuite / BistSequence');
   if (fileName) {
     const base = fileName.replace(/^.*[\\/]/, '').replace(/\.(dart|m?[jt]s|json|bist)$/, '');
     if (base !== json.id) e.push(`root id "${json.id}" differs from the file name "${base}"`);
@@ -342,7 +343,7 @@ export function validate(json: Json, fileName?: string): string[] {
 }
 
 /** Every id and every `runTest` in the tree */
-export function collectIds(root: TestCaseNode): { ids: string[]; runTests: string[] } {
+export function collectIds(root: BistUnitNode): { ids: string[]; runTests: string[] } {
   const ids: string[] = [], runTests: string[] = [];
   const actions = (list?: unknown[]) => {
     for (const a of (list ?? []) as Json[]) {
@@ -351,12 +352,12 @@ export function collectIds(root: TestCaseNode): { ids: string[]; runTests: strin
       actions(a.steps as unknown[]);
     }
   };
-  const visit = (c: TestCaseNode) => {
+  const visit = (c: BistUnitNode) => {
     if (c.id) ids.push(c.id);
     actions(c.pre);
     actions(c.after);
-    if (c.type === 'unit') actions(c.steps);
-    else c.cases.forEach(visit);
+    if (c.type === 'case') actions(c.steps);
+    else c.units.forEach(visit);
   };
   visit(root);
   return { ids, runTests };
@@ -364,7 +365,7 @@ export function collectIds(root: TestCaseNode): { ids: string[]; runTests: strin
 
 // ==== Building actions ====
 
-function build(cmd: string, args: Record<string, unknown>): TestAction {
+function build(cmd: string, args: Record<string, unknown>): BistAction {
   const json: Json = { cmd };
   for (const [k, v] of Object.entries(args)) {
     if (v === undefined || v === null || (v === false && (k === 'enabled' || k === 'shot'))) continue;
@@ -373,7 +374,7 @@ function build(cmd: string, args: Record<string, unknown>): TestAction {
   const e: string[] = [];
   validateStep(json, cmd, false, e);
   if (e.length) throw new Error(e.join('\n'));
-  return Object.freeze(json) as TestAction;
+  return Object.freeze(json) as BistAction;
 }
 
 const find = (f: Find = {}) => ({ text: f.text, id: f.id, type: f.type, icon: f.icon, route: f.route, inside: f.inside, match: f.match === 'exact' ? undefined : f.match });
@@ -416,14 +417,14 @@ export const swipe = (direction: SwipeDirection, f: Find & Omit<Opt, 'timeout'> 
 /** Waits exactly ms milliseconds */
 export const wait = (ms: number, o: { note?: string; shot?: boolean } = {}) => build('wait', { ms, ...opt(o) });
 /** Runs the item with this id (a sub-script), then continues */
-export const runTest = (script: string, o: { note?: string; onError?: TestAction[] } = {}) => build('runTest', { script, ...opt(o) });
+export const runTest = (script: string, o: { note?: string; onError?: BistAction[] } = {}) => build('runTest', { script, ...opt(o) });
 
 // Loops, generated data
 /** Repeats steps with {{i}} = from..to (at most 200 iterations) */
-export const loop = (from: number, to: number, steps: TestAction[], o: { note?: string; onError?: TestAction[] } = {}) =>
+export const loop = (from: number, to: number, steps: BistAction[], o: { note?: string; onError?: BistAction[] } = {}) =>
   build('loop', { from, to, steps, ...opt(o) });
 /** While the condition (expect / notExpect) holds, runs steps; stops when it doesn't; fails after max iterations (default 20) */
-export const loopWhile = (condition: TestAction, steps: TestAction[], o: { max?: number; note?: string; onError?: TestAction[] } = {}) =>
+export const loopWhile = (condition: BistAction, steps: BistAction[], o: { max?: number; note?: string; onError?: BistAction[] } = {}) =>
   build('loopWhile', { condition, steps, max: o.max, ...opt(o) });
 /** Random integer min..max saved to {{name}}; format may contain `{value}` */
 export const randInt = (name: string, min: number, max: number, o: { format?: string; note?: string } = {}) =>
@@ -436,30 +437,30 @@ export const randText = (name: string, minLength: number, maxLength: number, o: 
 /** Text of a widget / input → {{name}} */
 export const getText = (name: string, f: Find & Omit<Opt, 'shot'>) => build('getText', { name, ...find(f), ...opt(f) });
 /** Value from the newest app log whose tag contains `tag`, at `path` (e.g. responseBody.data.userId) → {{name}} */
-export const getLog = (name: string, tag: string, o: { path?: string; level?: LogLevel; timeout?: number; note?: string; onError?: TestAction[] } = {}) =>
+export const getLog = (name: string, tag: string, o: { path?: string; level?: LogLevel; timeout?: number; note?: string; onError?: BistAction[] } = {}) =>
   build('getLog', { name, tag, path: o.path, level: o.level, ...opt(o) });
 /** user.id, user.name, user.role, user.logged, app.id, app.name, app.version, env, server.name, server.url, route, setting:<name>, values provided by the app (`Bist.instance.values`, `BistProvider.env`) → {{name}} */
-export const getEnv = (name: string, key: string, o: { note?: string; onError?: TestAction[] } = {}) => build('getEnv', { name, key, ...opt(o) });
+export const getEnv = (name: string, key: string, o: { note?: string; onError?: BistAction[] } = {}) => build('getEnv', { name, key, ...opt(o) });
 
 // Print, notify, ask the tester
-/** Writes to the report and the BIST| log */
+/** Writes to the step log and the BIST| log */
 export const log = (message: string, o: { note?: string } = {}) => build('log', { message, note: o.note });
 /** Short message on screen (3 seconds) */
 export const toast = (message: string, o: { note?: string } = {}) => build('toast', { message, note: o.note });
 /** Confirmation dialog for the tester: Yes passes, No fails (waits up to 5 minutes) */
-export const confirm = (message: string, o: { yes?: string; no?: string; timeout?: number; note?: string; onError?: TestAction[] } = {}) =>
+export const confirm = (message: string, o: { yes?: string; no?: string; timeout?: number; note?: string; onError?: BistAction[] } = {}) =>
   build('confirm', { message, yes: o.yes, no: o.no, ...opt(o) });
 /** Dialog asking the tester for input (OTP…) → {{name}} */
-export const ask = (name: string, message: string, o: { initial?: string; hint?: string; timeout?: number; note?: string; onError?: TestAction[] } = {}) =>
+export const ask = (name: string, message: string, o: { initial?: string; hint?: string; timeout?: number; note?: string; onError?: BistAction[] } = {}) =>
   build('ask', { name, message, initial: o.initial, hint: o.hint, ...opt(o) });
 
 // For developers
 /** Goes straight to a route */
 export const nav = (path: string, o: Opt = {}) => build('nav', { path, ...opt(o) });
 /** Switches the server, like picking one in the app's server settings */
-export const server = (name: string, o: { timeout?: number; note?: string; onError?: TestAction[] } = {}) => build('server', { name, ...opt(o) });
+export const server = (name: string, o: { timeout?: number; note?: string; onError?: BistAction[] } = {}) => build('server', { name, ...opt(o) });
 /** Waits for an app log whose tag contains `tag` */
-export const expectLog = (tag: string, o: { level?: LogLevel; timeout?: number; note?: string; onError?: TestAction[] } = {}) =>
+export const expectLog = (tag: string, o: { level?: LogLevel; timeout?: number; note?: string; onError?: BistAction[] } = {}) =>
   build('expectLog', { tag, level: o.level, ...opt(o) });
 
 // Mock server – removed automatically when the run ends
@@ -474,7 +475,7 @@ export const resetApi = (o: { note?: string } = {}) => build('resetApi', { note:
 
 // ==== Script tree ====
 
-function node<T extends TestCaseNode>(type: T['type'], p: CaseProps, body: Record<string, unknown>): T {
+function node<T extends BistUnitNode>(type: T['type'], p: UnitProps, body: Record<string, unknown>): T {
   return {
     type,
     ...(p.id != null && { id: p.id }),
@@ -490,19 +491,19 @@ function node<T extends TestCaseNode>(type: T['type'], p: CaseProps, body: Recor
 }
 
 /** One test: the actions in steps */
-export const TestUnit = (p: CaseProps & { steps?: TestAction[] }): TestUnitNode => node('unit', p, { steps: p.steps ?? [] });
+export const BistCase = (p: UnitProps & { steps?: BistAction[] }): BistCaseNode => node('case', p, { steps: p.steps ?? [] });
 
-/** Group: independent children; pre / after run around each child. One script file = one root TestGroup. */
-export const TestGroup = (p: CaseProps & { cases: TestCaseNode[] }): TestGroupNode => node('group', p, { cases: p.cases });
+/** Suite: independent children; pre / after run around each child. One script file = one root BistSuite. */
+export const BistSuite = (p: UnitProps & { units: BistUnitNode[] }): BistSuiteNode => node('suite', p, { units: p.units });
 
-/** Group run in order: if a child fails, the remaining children are skipped; pre / after run once */
-export const TestSequence = (p: CaseProps & { cases: TestCaseNode[] }): TestGroupNode => node('sequence', p, { cases: p.cases });
+/** Suite run in order: if a child fails, the remaining children are skipped; pre / after run once */
+export const BistSequence = (p: UnitProps & { units: BistUnitNode[] }): BistSuiteNode => node('sequence', p, { units: p.units });
 
 /** Script file JSON (root with schema) */
-export const toRootJson = (root: TestGroupNode) => ({ schema: SCHEMA, ...root });
+export const toRootJson = (root: BistSuiteNode) => ({ schema: SCHEMA, ...root });
 
 /** Prints the script file JSON – at the end of each `<id>.ts` file: `printJson(script)`. Throws on errors instead of printing. */
-export function printJson(root: TestGroupNode): void {
+export function printJson(root: BistSuiteNode): void {
   const json = toRootJson(root);
   const e = validate(json as unknown as Json);
   if (e.length) throw new Error(`${root.name}:\n${e.join('\n')}`);
@@ -698,7 +699,7 @@ async function main(argv: string[]): Promise<number> {
   }
   fs.mkdirSync(mjsDir, { recursive: true });
   const errors: string[] = [];
-  const roots = new Map<string, TestGroupNode>();
+  const roots = new Map<string, BistSuiteNode>();
   for (const f of files) {
     const id = f.replace(/\.ts$/, '');
     const source = fs.readFileSync(path.join(srcDir, f), 'utf8');

@@ -45,7 +45,7 @@ Future<void> main() async {
   await Bist.init(scriptAssets: 'assets/bist/');
   runApp(MaterialApp(
     navigatorObservers: [Bist.navigatorObserver], // routes for nav / back / route:
-    builder: BistView.overlay, // floating "BIST" button → scripts and reports (debug / profile builds)
+    builder: BistView.overlay, // floating "BIST" button → scripts and results (debug / profile builds)
     routes: {...},
   ));
 }
@@ -57,11 +57,11 @@ See [`example/`](example) – a login screen and an order list with a script tha
 
 ## Writing scripts
 
-A script is a tree: **`TestGroup`** (children are independent; `pre` / `after` run around each child),
-**`TestSequence`** (children run in order and stop at the first failure), **`TestUnit`** (one test: a list of steps).
+A script is a tree: **`BistSuite`** (children are independent; `pre` / `after` run around each child),
+**`BistSequence`** (children run in order and stop at the first failure), **`BistCase`** (one test: a list of steps).
 
 ```ts
-import { TestGroup, TestUnit, WidgetType, expect, input, tap, tc, printJson } from 'flutter_bist';
+import { BistSuite, BistCase, WidgetType, expect, input, tap, tc, printJson } from 'flutter_bist';
 
 const login = (user: string, pass: string) => [
   input(user, { text: 'Username' }),
@@ -69,15 +69,15 @@ const login = (user: string, pass: string) => [
   tap({ text: 'SIGN IN', type: WidgetType.button }),
 ];
 
-printJson(TestGroup({ id: 'login', name: 'Login', cases: [
-  TestUnit({ name: 'Missing fields', steps: [...login('', ''), expect({ text: 'Please enter your username and password.' })] }),
-  TestUnit({ id: 'login.admin', name: 'Admin', steps: [...login(tc('Admin', 'userName'), tc('Admin', 'password')), expect({ route: '/home', timeout: 15000 })] }),
+printJson(BistSuite({ id: 'login', name: 'Login', units: [
+  BistCase({ name: 'Missing fields', steps: [...login('', ''), expect({ text: 'Please enter your username and password.' })] }),
+  BistCase({ id: 'login.admin', name: 'Admin', steps: [...login(tc('Admin', 'userName'), tc('Admin', 'password')), expect({ route: '/home', timeout: 15000 })] }),
 ] }));
 ```
 
 Three ways to write them – all produce the same JSON (`schema: 4`):
 
-1. **BIST Editor** – [`bin/editor.html`](bin/editor.html). Download it, double-click (Chrome / Edge). Tree of groups and tests
+1. **BIST Editor** – [`bin/editor.html`](bin/editor.html). Download it, double-click (Chrome / Edge). Tree of suites and tests
    on the left, steps in the middle (completion, signatures, errors from the TypeScript language service), properties on
    the right, find / replace, find in project, undo / redo, and an optional AI assistant (Gemini, OpenRouter, Claude,
    ChatGPT, Ollama, any OpenAI-compatible server, or WebLLM in the browser). Saves a `.bist` file: minified JSON the app loads.
@@ -123,10 +123,16 @@ What each group of methods enables, and how to write a network adapter: [docs/pr
 
 ## Results
 
-- **Panel**: reports per run, per test, per step (command, time, error, texts on screen when it failed, app errors).
+- **Panel**: one row per run, the result tree (`BistResult`: one tree per run, shaped like the script – status, time,
+  error per test); tap a test for its folder and logs.
 - **Console**: every step prints a `BIST|{...}` JSON line – `adb logcat -d | grep "BIST|"` or the `flutter run` output –
   so an AI agent can run a script with `--dart-define=BIST_RUN_IDS=<id>` and read the result without a screenshot.
-- **Screenshots** of failed steps (and steps with `shot: true`) in `BistProvider.tempDir()/bist`.
+- **Result folder** of each run: `BistProvider.tempDir()/bist/<yyyy-MM-dd HH-mm-ss>/`, one folder per test
+  (`<number>/`, e.g. `1.1.1/`) with `pre.log` / `step.log` / `after.log` (one line per action: `<step> ✓|✗ <command>`, then
+  the error, app error logs and screen texts of a failed one), `error.log` (only the error) and JPEG screenshots
+  `shot_<pre | step | after>_<step>.jpg` (failed steps, and steps with `shot: true`). A suite's `pre` / `after` actions
+  go to the logs of the next / last test, as `<suite number>_<n>`. The `BIST|` line of each test and run gives the
+  folder (`dir`).
 
 ## Limits
 
@@ -139,9 +145,10 @@ flows testers repeat on every build.
 | Path | |
 |---|---|
 | `lib/flutter_bist.dart` | The only public library: everything below is exported from it |
-| `lib/src/model.dart` | Script model and builders (pure Dart) |
-| `lib/flutter_bist.dart` | `Bist` (runner), `BistProvider`, `BistTouch`, reports |
-| `lib/src/bist_view.dart` | `BistView`, `BistView.overlay`, `BistView.units` / `BistView.reports` |
+| `lib/src/unit.dart` | Script tree: `BistUnit` / `BistCase` / `BistSuite` / `BistSequence`, validation |
+| `lib/src/action.dart` | Script actions: `BistAction`, the `<Command>BistAction` classes and the command names (`tap`, `input`, …) – part of `unit.dart` |
+| `lib/flutter_bist.dart` | `Bist` (runner), `BistProvider`, `BistTouch`, `BistResult` |
+| `lib/src/bist_view.dart` | `BistView`, `BistView.overlay`, `BistView.units` / `BistView.results` |
 | `icon/logo.svg`, `icon/icon.svg` | BIST logo (680 × 304) and icon (128 × 128); `BistLogo` / `BistIcon` draw the same in Flutter |
 | `lib/src/localizations.dart` | `BistLocalizations` (texts of `BistView`), `BistLocalizationsDelegate` |
 | `tools/editor/` | Sources of the editor and the TS library: `editor.html`, `bist.ts`. `npm run build` writes `bin/` |

@@ -26,13 +26,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/scheduler.dart';
 import 'package:flutter/services.dart';
+import 'package:image/image.dart' as img;
 
-import 'src/model.dart';
+import 'src/unit.dart';
 
 // Everything is exported from this library: script model and builders (`tap`, `expect`, `log`…), the UI (`BistView`,
 // `BistLogo`, `BistIcon`, `BistLocalizations`). Test files that also import flutter_test:
 // `import 'package:flutter_bist/flutter_bist.dart' hide expect;` (or a prefix: `as bist` → `bist.expect(...)`).
-export 'src/model.dart';
+export 'src/unit.dart';
 export 'src/bist_view.dart';
 
 part 'src/provider.dart';

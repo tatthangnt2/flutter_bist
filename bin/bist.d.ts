@@ -1,17 +1,17 @@
 /**
  * BIST – write, check, bundle and export test scripts in TypeScript. A single file:
- * - **Script-writing library**: `import { TestGroup, TestUnit, tap, expect, … } from 'flutter_bist'` (resolves to this file / `bist.mjs`).
+ * - **Script-writing library**: `import { BistSuite, BistCase, tap, expect, … } from 'flutter_bist'` (resolves to this file / `bist.mjs`).
  * - **Tools**: `transpile`, `typecheck`, `bundleMjs` (shared by `editor.html` and the command line).
  * - **Editor page**: `npm run build` (in tools/editor) embeds this file into `bin/editor.html` – opens with a double click.
  * - **Export from the command line**: `node bin/bist.mjs <scripts dir> <JSON dir> [--mjs <dir>]`:
  *   `<id>.ts` → type check → standalone `<id>.mjs` (library embedded) → `node <id>.mjs` prints JSON → validate → `<id>.json` → app.
  *   The app only receives JSON (it never runs downloaded code). Needs the `typescript` package (installed here or globally).
  *
- * The JSON format (schema 4) is identical to the Dart model (`lib/src/model.dart`, exported by `package:flutter_bist/flutter_bist.dart`) – the in-app runner reads it with `TestGroup.fromJson`.
+ * The JSON format (schema 4) is identical to the Dart model (`lib/src/unit.dart` + `lib/src/action.dart`, exported by `package:flutter_bist/flutter_bist.dart`) – the in-app runner reads it with `BistSuite.fromJson`.
  * When changing commands / validation rules here, change the Dart model too. After editing this file run `npm run build` to regenerate `bin/bist.mjs`, `bin/bist.d.ts`.
  *
  * ```ts
- * import { TestGroup, TestUnit, WidgetType, input, tap, expect, printJson } from 'flutter_bist';
+ * import { BistSuite, BistCase, WidgetType, input, tap, expect, printJson } from 'flutter_bist';
  *
  * const login = (user: string, pass: string) => [
  *   input(user, { text: 'Username' }),
@@ -19,18 +19,22 @@
  *   tap({ text: 'SIGN IN', type: WidgetType.button }),
  * ];
  *
- * printJson(TestGroup({ id: 'login', name: 'Login', cases: [
- *   TestUnit({ name: 'Missing fields', steps: [...login('', ''), expect({ text: 'Please enter your username and password.' })] }),
+ * printJson(BistSuite({ id: 'login', name: 'Login', units: [
+ *   BistCase({ name: 'Missing fields', steps: [...login('', ''), expect({ text: 'Please enter your username and password.' })] }),
  * ] }));
  * ```
  */
 /** JSON format version – same as `kTestScriptSchema` in the Dart model */
 export declare const SCHEMA = 4;
+/** Kind of widget for `type:` (`checkbox` also covers switches) */
 export declare const WidgetType: {
     readonly button: "button";
     readonly input: "input";
     readonly text: "text";
     readonly image: "image";
+    readonly checkbox: "checkbox";
+    readonly radio: "radio";
+    readonly dropdown: "dropdown";
 };
 export type WidgetType = (typeof WidgetType)[keyof typeof WidgetType];
 export declare const LogLevel: {
@@ -59,7 +63,7 @@ export type TextMatch = (typeof TextMatch)[keyof typeof TextMatch];
 export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
 export type SwipeDirection = (typeof SwipeDirection)[keyof typeof SwipeDirection];
 /** One action (step) – the JSON sent to the app */
-export interface TestAction {
+export interface BistAction {
     readonly cmd: string;
     readonly [key: string]: unknown;
 }
@@ -84,12 +88,12 @@ export interface Find {
 export interface Opt {
     /** Timeout (ms), default 5000 */
     timeout?: number;
-    /** Note shown in the report */
+    /** Note shown in Test results and the logs */
     note?: string;
     /** Take a screenshot at this step (failed steps always take one) */
     shot?: boolean;
     /** Actions to run when the step fails; if they all pass, the run continues (one level only) */
-    onError?: TestAction[];
+    onError?: BistAction[];
 }
 /** Extra conditions for expect / notExpect */
 export interface FieldState {
@@ -111,7 +115,7 @@ export interface FieldState {
     selected?: boolean;
 }
 /** Properties shared by every node in the tree */
-export interface CaseProps {
+export interface UnitProps {
     name: string;
     /** For calling it again (`runTest(id)`) and running it alone (`BIST_RUN_IDS=<id>`); unique across all files */
     id?: string;
@@ -122,19 +126,19 @@ export interface CaseProps {
     manual?: string;
     /** Creates / changes data – only runs on non-Production servers */
     writes?: boolean;
-    /** Setup / cleanup (TestGroup: around each child; TestSequence: once) */
-    pre?: TestAction[];
-    after?: TestAction[];
+    /** Setup / cleanup (BistSuite: around each child; BistSequence: once) */
+    pre?: BistAction[];
+    after?: BistAction[];
 }
-export interface TestUnitNode extends CaseProps {
-    readonly type: 'unit';
-    steps: TestAction[];
+export interface BistCaseNode extends UnitProps {
+    readonly type: 'case';
+    steps: BistAction[];
 }
-export interface TestGroupNode extends CaseProps {
-    readonly type: 'group' | 'sequence';
-    cases: TestCaseNode[];
+export interface BistSuiteNode extends UnitProps {
+    readonly type: 'suite' | 'sequence';
+    units: BistUnitNode[];
 }
-export type TestCaseNode = TestUnitNode | TestGroupNode;
+export type BistUnitNode = BistCaseNode | BistSuiteNode;
 /** Secret-looking keys / paths – getEnv, getLog refuse them */
 export declare const SECRET_PATTERN: RegExp;
 /** Placeholders replaced at run time: `{{tc:group.field}}`, `{{env:key}}`, `{{date:+1}}`, `{{now}}`, `{{i}}`, `{{variable}}` */
@@ -144,7 +148,7 @@ type Json = Record<string, unknown>;
 /** Validates a script file's JSON (the root has `schema`), returns the list of errors. [fileName]: check the root id matches the file name. */
 export declare function validate(json: Json, fileName?: string): string[];
 /** Every id and every `runTest` in the tree */
-export declare function collectIds(root: TestCaseNode): {
+export declare function collectIds(root: BistUnitNode): {
     ids: string[];
     runTests: string[];
 };
@@ -153,116 +157,116 @@ export declare const tc: (group: string, field: string) => string;
 /** Environment info used directly in text (see getEnv) */
 export declare const env: (key: string) => string;
 /** Taps the widget matching all given properties */
-export declare const tap: (f: Find & Opt) => TestAction;
+export declare const tap: (f: Find & Opt) => BistAction;
 /** Long press (700 ms) */
-export declare const tapLong: (f: Find & Opt) => TestAction;
+export declare const tapLong: (f: Find & Opt) => BistAction;
 /** Double tap */
-export declare const tapDouble: (f: Find & Opt) => TestAction;
+export declare const tapDouble: (f: Find & Opt) => BistAction;
 /** Enters text (replaces existing text, '' clears it); no finder = the focused field. Dropdown: the text of the item to pick. */
-export declare const input: (value: string, f?: Find & Opt) => TestAction;
+export declare const input: (value: string, f?: Find & Opt) => BistAction;
 /** Picks a date `dd/MM/yyyy` (or `{{date:+1}}`) */
-export declare const inputDate: (value: string, f?: Find & Opt) => TestAction;
+export declare const inputDate: (value: string, f?: Find & Opt) => BistAction;
 /** Picks a date range */
-export declare const inputDateRange: (start: string, end: string, f?: Find & Opt) => TestAction;
+export declare const inputDateRange: (start: string, end: string, f?: Find & Opt) => BistAction;
 /** Sample file for the next file / image picker: downloads `url` (https, cached) when reached */
 export declare const pickFile: (url: string, o?: {
     name?: string;
     note?: string;
-}) => TestAction;
+}) => BistAction;
 /** Waits until a widget matching all properties is visible (scrolls to find it); only `route` = waits for that screen */
-export declare const expect: (f: Find & FieldState & Opt) => TestAction;
+export declare const expect: (f: Find & FieldState & Opt) => BistAction;
 /** Waits until the widget is gone; with field conditions: the field must exist but not match them */
-export declare const notExpect: (f: Find & FieldState & Opt) => TestAction;
+export declare const notExpect: (f: Find & FieldState & Opt) => BistAction;
 /** Goes back / closes the dialog */
-export declare const back: (o?: Omit<Opt, "timeout">) => TestAction;
+export declare const back: (o?: Omit<Opt, "timeout">) => BistAction;
 /** Swipe: up = see content below, down = pull to refresh; with a finder, swipes inside the scrollable containing that widget */
-export declare const swipe: (direction: SwipeDirection, f?: Find & Omit<Opt, "timeout">) => TestAction;
+export declare const swipe: (direction: SwipeDirection, f?: Find & Omit<Opt, "timeout">) => BistAction;
 /** Waits exactly ms milliseconds */
 export declare const wait: (ms: number, o?: {
     note?: string;
     shot?: boolean;
-}) => TestAction;
+}) => BistAction;
 /** Runs the item with this id (a sub-script), then continues */
 export declare const runTest: (script: string, o?: {
     note?: string;
-    onError?: TestAction[];
-}) => TestAction;
+    onError?: BistAction[];
+}) => BistAction;
 /** Repeats steps with {{i}} = from..to (at most 200 iterations) */
-export declare const loop: (from: number, to: number, steps: TestAction[], o?: {
+export declare const loop: (from: number, to: number, steps: BistAction[], o?: {
     note?: string;
-    onError?: TestAction[];
-}) => TestAction;
+    onError?: BistAction[];
+}) => BistAction;
 /** While the condition (expect / notExpect) holds, runs steps; stops when it doesn't; fails after max iterations (default 20) */
-export declare const loopWhile: (condition: TestAction, steps: TestAction[], o?: {
+export declare const loopWhile: (condition: BistAction, steps: BistAction[], o?: {
     max?: number;
     note?: string;
-    onError?: TestAction[];
-}) => TestAction;
+    onError?: BistAction[];
+}) => BistAction;
 /** Random integer min..max saved to {{name}}; format may contain `{value}` */
 export declare const randInt: (name: string, min: number, max: number, o?: {
     format?: string;
     note?: string;
-}) => TestAction;
+}) => BistAction;
 /** Random text of length minLength..maxLength saved to {{name}} */
 export declare const randText: (name: string, minLength: number, maxLength: number, o?: {
     chars?: string;
     format?: string;
     note?: string;
-}) => TestAction;
+}) => BistAction;
 /** Text of a widget / input → {{name}} */
-export declare const getText: (name: string, f: Find & Omit<Opt, "shot">) => TestAction;
+export declare const getText: (name: string, f: Find & Omit<Opt, "shot">) => BistAction;
 /** Value from the newest app log whose tag contains `tag`, at `path` (e.g. responseBody.data.userId) → {{name}} */
 export declare const getLog: (name: string, tag: string, o?: {
     path?: string;
     level?: LogLevel;
     timeout?: number;
     note?: string;
-    onError?: TestAction[];
-}) => TestAction;
+    onError?: BistAction[];
+}) => BistAction;
 /** user.id, user.name, user.role, user.logged, app.id, app.name, app.version, env, server.name, server.url, route, setting:<name>, values provided by the app (`Bist.instance.values`, `BistProvider.env`) → {{name}} */
 export declare const getEnv: (name: string, key: string, o?: {
     note?: string;
-    onError?: TestAction[];
-}) => TestAction;
-/** Writes to the report and the BIST| log */
+    onError?: BistAction[];
+}) => BistAction;
+/** Writes to the step log and the BIST| log */
 export declare const log: (message: string, o?: {
     note?: string;
-}) => TestAction;
+}) => BistAction;
 /** Short message on screen (3 seconds) */
 export declare const toast: (message: string, o?: {
     note?: string;
-}) => TestAction;
+}) => BistAction;
 /** Confirmation dialog for the tester: Yes passes, No fails (waits up to 5 minutes) */
 export declare const confirm: (message: string, o?: {
     yes?: string;
     no?: string;
     timeout?: number;
     note?: string;
-    onError?: TestAction[];
-}) => TestAction;
+    onError?: BistAction[];
+}) => BistAction;
 /** Dialog asking the tester for input (OTP…) → {{name}} */
 export declare const ask: (name: string, message: string, o?: {
     initial?: string;
     hint?: string;
     timeout?: number;
     note?: string;
-    onError?: TestAction[];
-}) => TestAction;
+    onError?: BistAction[];
+}) => BistAction;
 /** Goes straight to a route */
-export declare const nav: (path: string, o?: Opt) => TestAction;
+export declare const nav: (path: string, o?: Opt) => BistAction;
 /** Switches the server, like picking one in the app's server settings */
 export declare const server: (name: string, o?: {
     timeout?: number;
     note?: string;
-    onError?: TestAction[];
-}) => TestAction;
+    onError?: BistAction[];
+}) => BistAction;
 /** Waits for an app log whose tag contains `tag` */
 export declare const expectLog: (tag: string, o?: {
     level?: LogLevel;
     timeout?: number;
     note?: string;
-    onError?: TestAction[];
-}) => TestAction;
+    onError?: BistAction[];
+}) => BistAction;
 /** Requests whose URL contains `api` (and match `method`, if given) get a fake response: `status` (default 200), `body` (JSON text or object),
  *  after `delay` ms, for `times` requests, then it removes itself. Use it to test error screens, empty data, slow networks. */
 export declare const mockApi: (api: string, o?: {
@@ -272,32 +276,32 @@ export declare const mockApi: (api: string, o?: {
     times?: number;
     method?: HttpMethod;
     note?: string;
-}) => TestAction;
+}) => BistAction;
 /** Simulates going offline (`on` defaults to true) or back online (`on: false`): every request fails with "Disconnected" */
 export declare const offline: (o?: {
     on?: boolean;
     note?: string;
-}) => TestAction;
+}) => BistAction;
 /** Removes every active mockApi / offline */
 export declare const resetApi: (o?: {
     note?: string;
-}) => TestAction;
+}) => BistAction;
 /** One test: the actions in steps */
-export declare const TestUnit: (p: CaseProps & {
-    steps?: TestAction[];
-}) => TestUnitNode;
-/** Group: independent children; pre / after run around each child. One script file = one root TestGroup. */
-export declare const TestGroup: (p: CaseProps & {
-    cases: TestCaseNode[];
-}) => TestGroupNode;
-/** Group run in order: if a child fails, the remaining children are skipped; pre / after run once */
-export declare const TestSequence: (p: CaseProps & {
-    cases: TestCaseNode[];
-}) => TestGroupNode;
+export declare const BistCase: (p: UnitProps & {
+    steps?: BistAction[];
+}) => BistCaseNode;
+/** Suite: independent children; pre / after run around each child. One script file = one root BistSuite. */
+export declare const BistSuite: (p: UnitProps & {
+    units: BistUnitNode[];
+}) => BistSuiteNode;
+/** Suite run in order: if a child fails, the remaining children are skipped; pre / after run once */
+export declare const BistSequence: (p: UnitProps & {
+    units: BistUnitNode[];
+}) => BistSuiteNode;
 /** Script file JSON (root with schema) */
-export declare const toRootJson: (root: TestGroupNode) => {
-    type: "group" | "sequence";
-    cases: TestCaseNode[];
+export declare const toRootJson: (root: BistSuiteNode) => {
+    type: "suite" | "sequence";
+    units: BistUnitNode[];
     name: string;
     /** For calling it again (`runTest(id)`) and running it alone (`BIST_RUN_IDS=<id>`); unique across all files */
     id?: string;
@@ -308,13 +312,13 @@ export declare const toRootJson: (root: TestGroupNode) => {
     manual?: string;
     /** Creates / changes data – only runs on non-Production servers */
     writes?: boolean;
-    /** Setup / cleanup (TestGroup: around each child; TestSequence: once) */
-    pre?: TestAction[];
-    after?: TestAction[];
+    /** Setup / cleanup (BistSuite: around each child; BistSequence: once) */
+    pre?: BistAction[];
+    after?: BistAction[];
     schema: number;
 };
 /** Prints the script file JSON – at the end of each `<id>.ts` file: `printJson(script)`. Throws on errors instead of printing. */
-export declare function printJson(root: TestGroupNode): void;
+export declare function printJson(root: BistSuiteNode): void;
 /** Error with a line number */
 export interface Diagnostic {
     line: number;

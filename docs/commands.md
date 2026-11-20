@@ -2,16 +2,18 @@
 
 Script JSON `schema: 4`. Builders have the same names in TypeScript (`import … from 'flutter_bist'`, options in an object:
 `tap({ text: 'Send' })`) and Dart (`package:flutter_bist/flutter_bist.dart`, named parameters: `tap(text: 'Send')`).
+In Dart each command is a class extending `BistAction` (`<Command>BistAction`: `TapBistAction`, `InputBistAction`, …) and the
+command name is its constructor: `final tap = TapBistAction.new;` – `tap(...)` and `TapBistAction(...)` are the same.
 
 ## Script tree
 
 | Node | Meaning |
 |---|---|
-| `TestGroup` | Children are independent: a failing child doesn't stop the others. `pre` / `after` run before / after **each** child. A script file is one root group whose `id` equals the file name. |
-| `TestSequence` | Children run in order (they share `{{now}}` and variables); after a failure the rest is skipped. Running one child alone runs the children before it first. `pre` / `after` run once. |
-| `TestUnit` | One test: `steps`, plus its own `pre` / `after`. |
+| `BistSuite` | Children are independent: a failing child doesn't stop the others. `pre` / `after` run before / after **each** child. A script file is one root suite whose `id` equals the file name. |
+| `BistSequence` | Children run in order (they share `{{now}}` and variables); after a failure the rest is skipped. Running one child alone runs the children before it first. `pre` / `after` run once. |
+| `BistCase` | One test: `steps`, plus its own `pre` / `after`. |
 
-Every node: `name`, `id` (unique, `[A-Za-z0-9._-]`, for `runTest` and `BIST_RUN_IDS`), `minVersion` / `maxVersion`
+Every node (`BistUnit`, the base of the three): `name`, `id` (unique, `[A-Za-z0-9._-]`, for `runTest` and `BIST_RUN_IDS`), `minVersion` / `maxVersion`
 (`1.0.0+10`, outside the range → "Not for this version"), `manual` (reason it can't be automated → "Needs a tester",
 not a failure), `writes` (creates / changes data → refused on production servers).
 
@@ -24,7 +26,7 @@ Every finding command accepts these properties; the widget must match **all** of
 | `text` | Visible text, input label / hint, tooltip, Semantics label (plus what `BistProvider.textsOf` returns) |
 | `match` | How `text` / `value` compare: `exact` (default), `contains`, `regex` |
 | `id` | `ValueKey` of the widget (or an ancestor close to the text) |
-| `type` | `button`, `input`, `text`, `image` |
+| `type` | `button`, `input`, `text`, `image`, `checkbox` (also switches), `radio`, `dropdown` |
 | `icon` | Material icon name for icon-only buttons: `add`, `close`, `delete`, `edit`, `logout`, `menu`, `more_vert`, `search`, `send`, `settings`, … |
 | `route` | Only inside the screen with this route |
 | `inside` | Only inside a block (card, list row, dialog) that contains this exact text |
@@ -32,7 +34,7 @@ Every finding command accepts these properties; the widget must match **all** of
 The runner waits up to `timeout` (default 5000 ms), scrolls the largest list when the widget isn't on screen, and
 closes the keyboard when it covers the widget.
 
-Options of every step: `timeout` (ms), `note` (shown in reports), `shot` (screenshot even when it passes), `onError`
+Options of every step: `timeout` (ms), `note` (shown in Test results and the logs), `shot` (screenshot even when it passes), `onError`
 (actions to run when the step fails – if they pass, the step counts as passed; one level only).
 
 ## Tap, input
@@ -84,7 +86,7 @@ paths (token, password, cookie, authorization…) are refused.
 
 | Command | |
 |---|---|
-| `log(message)` | Into the report and the `BIST|` console line |
+| `log(message)` | Into the step log and the `BIST|` console line |
 | `toast(message)` | Short message on screen |
 | `confirm(message, {yes, no})` | Tester answers; "no" fails the step |
 | `ask(name, message, {initial, hint})` | Tester types a value (e.g. an OTP) into `{{name}}` |

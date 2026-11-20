@@ -1,33 +1,33 @@
 import 'package:flutter_bist/flutter_bist.dart';
 import 'package:flutter_test/flutter_test.dart' as t;
 
-List<TestAction> login(String user, String pass) => [
+List<BistAction> login(String user, String pass) => [
   input(user, text: 'Username'),
   input(pass, text: 'Password'),
   tap(text: 'SIGN IN', type: WidgetType.button),
 ];
 
 void main() {
-  final script = TestGroup(
+  final script = BistSuite(
     id: 'app',
     name: 'App',
     pre: [server('DEV')],
-    cases: [
-      TestGroup(
+    units: [
+      BistSuite(
         id: 'login',
         name: 'Login',
         pre: [
           expect(text: 'SIGN IN', timeout: 500, onError: [runTest('logout')]),
         ],
-        cases: [
-          TestUnit(
+        units: [
+          BistCase(
             name: 'Missing fields',
             steps: [
               ...login('', ''),
               expect(text: 'Please enter username and password.'),
             ],
           ),
-          TestUnit(
+          BistCase(
             id: 'login.admin',
             name: 'Admin',
             steps: [
@@ -35,22 +35,22 @@ void main() {
               notExpect(text: 'SIGN IN'),
             ],
           ),
-          TestUnit(name: 'Google', manual: 'OS account picker'),
+          BistCase(name: 'Google', manual: 'OS account picker'),
         ],
       ),
-      TestSequence(
+      BistSequence(
         name: 'Leave request',
         writes: true,
         minVersion: '1.0.20+140',
-        cases: [
-          TestUnit(
+        units: [
+          BistCase(
             name: 'Create',
             steps: [
               tapDouble(icon: 'add', route: '/leave'),
               wait(100),
             ],
           ),
-          TestUnit(
+          BistCase(
             name: 'Detail',
             maxVersion: '2.0.0',
             steps: [
@@ -60,7 +60,7 @@ void main() {
           ),
         ],
       ),
-      TestUnit(
+      BistCase(
         id: 'logout',
         name: 'Logout',
         steps: [
@@ -73,22 +73,22 @@ void main() {
 
   t.group('Script tree', () {
     t.test('numbers, parent, writes', () {
-      final seq = script.cases[1] as TestSequence;
-      t.expect(seq.cases[1].number, '2.2');
-      t.expect(seq.cases[1].isWrites, true);
+      final seq = script.units[1] as BistSequence;
+      t.expect(seq.units[1].number, '2.2');
+      t.expect(seq.units[1].isWrites, true);
       t.expect(script.findId('login.admin')!.number, '1.2');
       t.expect(script.findNumber('2.1')!.name, 'Create');
-      t.expect(script.units.length, 6);
+      t.expect(script.cases.length, 6);
       t.expect(script.runTests, {'logout'});
     });
 
     t.test('JSON round trip', () {
-      final back = TestGroup.decode(script.encode());
+      final back = BistSuite.decode(script.encode());
       t.expect(back.toRootJson(), script.toRootJson());
-      t.expect(back.cases[1], t.isA<TestSequence>());
-      t.expect((back.cases[0] as TestGroup).cases[2].manual, t.isA<String>());
-      t.expect(TestGroup.validate(script.toRootJson(), fileName: 'scripts/app.bist'), t.isEmpty);
-      t.expect(TestGroup.validate(script.toRootJson(), fileName: 'other.json'), t.isNotEmpty);
+      t.expect(back.units[1], t.isA<BistSequence>());
+      t.expect((back.units[0] as BistSuite).units[2].manual, t.isA<String>());
+      t.expect(BistSuite.validate(script.toRootJson(), fileName: 'scripts/app.bist'), t.isEmpty);
+      t.expect(BistSuite.validate(script.toRootJson(), fileName: 'other.json'), t.isNotEmpty);
     });
 
     t.test('version 1.0.0+10', () {
@@ -96,10 +96,10 @@ void main() {
       t.expect(TestVersion.parse('1.0.21').compareTo(TestVersion.parse('1.0.21+1')), 0);
       t.expect(() => TestVersion.parse('1.0'), t.throwsFormatException);
       t.expect(TestVersion.tryFrom('1.2.0-beta', 15).toString(), '1.2.0+15');
-      final seq = script.cases[1];
+      final seq = script.units[1];
       t.expect(seq.appliesTo(TestVersion.parse('1.0.20+139')), false);
       t.expect(seq.appliesTo(TestVersion.parse('1.0.21+1')), true);
-      t.expect((seq as TestGroup).cases[1].appliesTo(TestVersion.parse('2.0.1')), false);
+      t.expect((seq as BistSuite).units[1].appliesTo(TestVersion.parse('2.0.1')), false);
     });
 
     t.test('invalid scripts are reported', () {
@@ -114,27 +114,27 @@ void main() {
         ),
         t.throwsArgumentError,
       );
-      final errors = TestGroup.validate({
+      final errors = BistSuite.validate({
         'schema': kTestScriptSchema,
-        'type': 'group',
+        'type': 'suite',
         'id': 'a',
         'name': 'a',
-        'cases': [
+        'units': [
           {
-            'type': 'unit',
+            'type': 'case',
             'id': 'x',
             'name': 'u',
             'steps': [
               {'cmd': 'see', 'text': 'A'},
             ],
           },
-          {'type': 'unit', 'id': 'x', 'name': 'v', 'minVersion': '1.0', 'steps': []},
+          {'type': 'case', 'id': 'x', 'name': 'v', 'minVersion': '1.0', 'steps': []},
         ],
       });
       t.expect(errors, t.hasLength(t.greaterThanOrEqualTo(4)));
       t.expect(errors.join('\n'), t.contains('unknown command'));
       t.expect(errors.join('\n'), t.contains('is duplicated'));
-      t.expect(() => TestGroup.fromJson({'schema': kTestScriptSchema + 1, 'type': 'group', 'id': 'a', 'name': 'a', 'cases': []}), t.throwsUnsupportedError);
+      t.expect(() => BistSuite.fromJson({'schema': kTestScriptSchema + 1, 'type': 'suite', 'id': 'a', 'name': 'a', 'units': []}), t.throwsUnsupportedError);
     });
 
     t.test('input checks, loops, generated data, dates', () {
@@ -148,19 +148,19 @@ void main() {
         loop(1, 3, [input('Line {{i}}', text: 'Note'), runTest('logout')]),
         loopWhile(expect(text: 'Load more', timeout: 500), [swipe(SwipeDirection.up)], max: 5),
       ];
-      final g = TestGroup(
+      final g = BistSuite(
         id: 'g',
         name: 'g',
-        cases: [
-          TestUnit(id: 'logout', name: 'x', steps: [back()]),
-          TestUnit(name: 'u', steps: steps),
+        units: [
+          BistCase(id: 'logout', name: 'x', steps: [back()]),
+          BistCase(name: 'u', steps: steps),
         ],
       );
-      t.expect(TestGroup.validate(g.toRootJson()), t.isEmpty);
-      final back2 = TestGroup.decode(g.encode());
+      t.expect(BistSuite.validate(g.toRootJson()), t.isEmpty);
+      final back2 = BistSuite.decode(g.encode());
       t.expect(back2.toRootJson(), g.toRootJson());
       t.expect(g.runTests, {'logout'});
-      final st = (back2.cases[1] as TestUnit).steps;
+      final st = (back2.units[1] as BistCase).steps;
       t.expect(st[0].fieldValue, 'AB');
       t.expect(st[0].focused, false);
       t.expect(st[1].focused, true);
@@ -190,13 +190,13 @@ void main() {
         expect(text: env('user.name')),
         input('{{uid}} - {{fullName}}', text: 'Note'),
       ];
-      final g = TestGroup(
+      final g = BistSuite(
         id: 'g',
         name: 'g',
-        cases: [TestUnit(name: 'u', steps: steps)],
+        units: [BistCase(name: 'u', steps: steps)],
       );
-      t.expect(TestGroup.validate(g.toRootJson()), t.isEmpty);
-      t.expect(TestGroup.decode(g.encode()).toRootJson(), g.toRootJson());
+      t.expect(BistSuite.validate(g.toRootJson()), t.isEmpty);
+      t.expect(BistSuite.decode(g.encode()).toRootJson(), g.toRootJson());
       t.expect(steps[1].describe(), 'getLog {{uid}} ← log "login" responseBody.data.userId (success)');
       t.expect(steps[2].describe(), 'getEnv {{ver}} ← app.version');
       t.expect(kTestValuePattern.allMatches('{{env:user.name}} {{uid}}').map((m) => m[1]).toList(), ['env:user.name', 'uid']);
@@ -215,13 +215,13 @@ void main() {
         ask('otp', 'Type the OTP sent to the phone', hint: '6 digits'),
         input('{{otp}}', text: 'OTP'),
       ];
-      final g = TestGroup(
+      final g = BistSuite(
         id: 'g',
         name: 'g',
-        cases: [TestUnit(name: 'u', steps: steps)],
+        units: [BistCase(name: 'u', steps: steps)],
       );
-      t.expect(TestGroup.validate(g.toRootJson()), t.isEmpty);
-      t.expect(TestGroup.decode(g.encode()).toRootJson(), g.toRootJson());
+      t.expect(BistSuite.validate(g.toRootJson()), t.isEmpty);
+      t.expect(BistSuite.decode(g.encode()).toRootJson(), g.toRootJson());
       t.expect(steps[2].describe(), 'confirm "Is the "Send" button color right?"');
       t.expect(steps[3].describe(), 'ask {{otp}} ← "Type the OTP sent to the phone"');
       t.expect(() => ask('now', 'x'), t.throwsArgumentError);
@@ -231,5 +231,47 @@ void main() {
     t.test('placeholders', () {
       t.expect(kTestValuePattern.allMatches('BIST {{now}} {{date:+1}} {{tc:A.b}} {{x-1}}').map((m) => m[1]).toList(), ['now', 'date:+1', 'tc:A.b']);
     });
+  });
+
+  t.test('each command is a BistAction subclass, the command name is its constructor', () {
+    final a = tap(text: 'Send', type: WidgetType.button);
+    t.expect(a, t.isA<TapBistAction>());
+    t.expect(a.toJson(), TapBistAction(text: 'Send', type: WidgetType.button).toJson());
+    t.expect(a.toJson(), {'cmd': 'tap', 'text': 'Send', 'type': 'button'});
+    t.expect(input('abc', text: 'User'), t.isA<InputBistAction>());
+    t.expect(loop(1, 2, [wait(10)]), t.isA<LoopBistAction>());
+    t.expect(BistAction.fromJson({'cmd': 'tap', 'text': 'Send'}).toJson(), tap(text: 'Send').toJson());
+    t.expect(() => TapBistAction(), t.throwsArgumentError);
+  });
+
+  t.test('command classes: own parameters in args, shared ones through super parameters – same JSON as before', () {
+    t.expect(input('abc', text: 'User', shot: true).toJson(), {'cmd': 'input', 'value': 'abc', 'text': 'User', 'shot': true});
+    t.expect(expect(text: 'User', type: WidgetType.input, value: 'abc', focused: false).toJson(), {
+      'cmd': 'expect',
+      'text': 'User',
+      'type': 'input',
+      'value': 'abc',
+      'focused': false,
+    });
+    t.expect(offline().toJson(), {'cmd': 'offline', 'on': true});
+    t.expect(getLog('uid', 'login', timeout: 8000).toJson(), {'cmd': 'getLog', 'name': 'uid', 'tag': 'login', 'timeout': 8000});
+    t.expect(swipe(SwipeDirection.up, text: 'List').toJson(), {'cmd': 'swipe', 'direction': 'up', 'text': 'List'});
+    t.expect(wait(100).toJson(), {'cmd': 'wait', 'ms': 100});
+    t.expect(tap(text: 'A', onError: [back()]).toJson(), {
+      'cmd': 'tap',
+      'text': 'A',
+      'onError': [
+        {'cmd': 'back'},
+      ],
+    });
+  });
+
+  t.test('BistAction.custom(cmd, json) builds a raw action (custom actions), cmd stays first and wins', () {
+    final a = BistAction.custom('myCommand', {'cmd': 'other', 'text': 'A', 'level': 3});
+    t.expect(a.cmd, 'myCommand');
+    t.expect(a.toJson(), {'cmd': 'myCommand', 'text': 'A', 'level': 3});
+    t.expect(a.toJson().keys.first, 'cmd');
+    t.expect(a.text, 'A');
+    t.expect(BistAction.custom('back').toJson(), {'cmd': 'back'});
   });
 }

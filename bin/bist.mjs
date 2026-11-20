@@ -1,17 +1,17 @@
 /**
  * BIST – write, check, bundle and export test scripts in TypeScript. A single file:
- * - **Script-writing library**: `import { TestGroup, TestUnit, tap, expect, … } from 'flutter_bist'` (resolves to this file / `bist.mjs`).
+ * - **Script-writing library**: `import { BistSuite, BistCase, tap, expect, … } from 'flutter_bist'` (resolves to this file / `bist.mjs`).
  * - **Tools**: `transpile`, `typecheck`, `bundleMjs` (shared by `editor.html` and the command line).
  * - **Editor page**: `npm run build` (in tools/editor) embeds this file into `bin/editor.html` – opens with a double click.
  * - **Export from the command line**: `node bin/bist.mjs <scripts dir> <JSON dir> [--mjs <dir>]`:
  *   `<id>.ts` → type check → standalone `<id>.mjs` (library embedded) → `node <id>.mjs` prints JSON → validate → `<id>.json` → app.
  *   The app only receives JSON (it never runs downloaded code). Needs the `typescript` package (installed here or globally).
  *
- * The JSON format (schema 4) is identical to the Dart model (`lib/src/model.dart`, exported by `package:flutter_bist/flutter_bist.dart`) – the in-app runner reads it with `TestGroup.fromJson`.
+ * The JSON format (schema 4) is identical to the Dart model (`lib/src/unit.dart` + `lib/src/action.dart`, exported by `package:flutter_bist/flutter_bist.dart`) – the in-app runner reads it with `BistSuite.fromJson`.
  * When changing commands / validation rules here, change the Dart model too. After editing this file run `npm run build` to regenerate `bin/bist.mjs`, `bin/bist.d.ts`.
  *
  * ```ts
- * import { TestGroup, TestUnit, WidgetType, input, tap, expect, printJson } from 'flutter_bist';
+ * import { BistSuite, BistCase, WidgetType, input, tap, expect, printJson } from 'flutter_bist';
  *
  * const login = (user: string, pass: string) => [
  *   input(user, { text: 'Username' }),
@@ -19,15 +19,16 @@
  *   tap({ text: 'SIGN IN', type: WidgetType.button }),
  * ];
  *
- * printJson(TestGroup({ id: 'login', name: 'Login', cases: [
- *   TestUnit({ name: 'Missing fields', steps: [...login('', ''), expect({ text: 'Please enter your username and password.' })] }),
+ * printJson(BistSuite({ id: 'login', name: 'Login', units: [
+ *   BistCase({ name: 'Missing fields', steps: [...login('', ''), expect({ text: 'Please enter your username and password.' })] }),
  * ] }));
  * ```
  */
 /** JSON format version – same as `kTestScriptSchema` in the Dart model */
 export const SCHEMA = 4;
 // ==== Types ====
-export const WidgetType = { button: 'button', input: 'input', text: 'text', image: 'image' };
+/** Kind of widget for `type:` (`checkbox` also covers switches) */
+export const WidgetType = { button: 'button', input: 'input', text: 'text', image: 'image', checkbox: 'checkbox', radio: 'radio', dropdown: 'dropdown' };
 export const LogLevel = { debug: 'debug', info: 'info', warn: 'warn', error: 'error', damage: 'damage', success: 'success' };
 export const SwipeDirection = { up: 'up', down: 'down', left: 'left', right: 'right' };
 /** How `text` / `value` is compared: exact (default), contains, regular expression */
@@ -219,13 +220,13 @@ function validateStep(raw, p, nested, e) {
 const VERSION = /^(\d+)\.(\d+)\.(\d+)(?:\+(\d+))?$/;
 function validateCase(raw, p, ids, e, root = false) {
     if (raw === null || typeof raw !== 'object' || Array.isArray(raw)) {
-        e.push(`${p}: must be a TestUnit / TestGroup / TestSequence`);
+        e.push(`${p}: must be a BistCase / BistSuite / BistSequence`);
         return;
     }
     const c = raw;
     const where = typeof c.name === 'string' ? `${p} "${c.name}"` : p;
-    if (!['unit', 'group', 'sequence'].includes(c.type))
-        e.push(`${where}: type must be unit | group | sequence`);
+    if (!['case', 'suite', 'sequence'].includes(c.type))
+        e.push(`${where}: type must be case | suite | sequence`);
     if (typeof c.name !== 'string' || !c.name.trim())
         e.push(`${where}: name is required`);
     if (c.id != null) {
@@ -244,7 +245,7 @@ function validateCase(raw, p, ids, e, root = false) {
         e.push(`${where}: manual must be a string (the reason)`);
     if (c.writes != null && typeof c.writes !== 'boolean')
         e.push(`${where}: writes must be true | false`);
-    const allowed = ['type', 'id', 'name', 'minVersion', 'maxVersion', 'manual', 'writes', 'pre', 'after', ...(root ? ['schema'] : []), c.type === 'unit' ? 'steps' : 'cases'];
+    const allowed = ['type', 'id', 'name', 'minVersion', 'maxVersion', 'manual', 'writes', 'pre', 'after', ...(root ? ['schema'] : []), c.type === 'case' ? 'steps' : 'units'];
     for (const k of Object.keys(c))
         if (!allowed.includes(k))
             e.push(`${where}: unknown field "${k}"`);
@@ -263,14 +264,14 @@ function validateCase(raw, p, ids, e, root = false) {
     };
     actions('pre');
     actions('after');
-    if (c.type === 'unit')
+    if (c.type === 'case')
         actions('steps', true);
-    else if (c.type === 'group' || c.type === 'sequence') {
-        const cases = c.cases;
-        if (!Array.isArray(cases) || !cases.length)
-            e.push(`${where}: cases needs at least 1 item`);
+    else if (c.type === 'suite' || c.type === 'sequence') {
+        const units = c.units;
+        if (!Array.isArray(units) || !units.length)
+            e.push(`${where}: units needs at least 1 item`);
         else
-            cases.forEach((x, i) => validateCase(x, `${p}.${i + 1}`.replace('Root.', ''), ids, e));
+            units.forEach((x, i) => validateCase(x, `${p}.${i + 1}`.replace('Root.', ''), ids, e));
     }
 }
 /** Validates a script file's JSON (the root has `schema`), returns the list of errors. [fileName]: check the root id matches the file name. */
@@ -278,8 +279,8 @@ export function validate(json, fileName) {
     const e = [];
     if (json.schema !== SCHEMA)
         e.push(`schema must be ${SCHEMA}`);
-    if (json.type !== 'group' && json.type !== 'sequence')
-        e.push('the root must be a TestGroup / TestSequence');
+    if (json.type !== 'suite' && json.type !== 'sequence')
+        e.push('the root must be a BistSuite / BistSequence');
     if (fileName) {
         const base = fileName.replace(/^.*[\\/]/, '').replace(/\.(dart|m?[jt]s|json|bist)$/, '');
         if (base !== json.id)
@@ -304,10 +305,10 @@ export function collectIds(root) {
             ids.push(c.id);
         actions(c.pre);
         actions(c.after);
-        if (c.type === 'unit')
+        if (c.type === 'case')
             actions(c.steps);
         else
-            c.cases.forEach(visit);
+            c.units.forEach(visit);
     };
     visit(root);
     return { ids, runTests };
@@ -379,7 +380,7 @@ export const getLog = (name, tag, o = {}) => build('getLog', { name, tag, path: 
 /** user.id, user.name, user.role, user.logged, app.id, app.name, app.version, env, server.name, server.url, route, setting:<name>, values provided by the app (`Bist.instance.values`, `BistProvider.env`) → {{name}} */
 export const getEnv = (name, key, o = {}) => build('getEnv', { name, key, ...opt(o) });
 // Print, notify, ask the tester
-/** Writes to the report and the BIST| log */
+/** Writes to the step log and the BIST| log */
 export const log = (message, o = {}) => build('log', { message, note: o.note });
 /** Short message on screen (3 seconds) */
 export const toast = (message, o = {}) => build('toast', { message, note: o.note });
@@ -418,11 +419,11 @@ function node(type, p, body) {
     };
 }
 /** One test: the actions in steps */
-export const TestUnit = (p) => node('unit', p, { steps: p.steps ?? [] });
-/** Group: independent children; pre / after run around each child. One script file = one root TestGroup. */
-export const TestGroup = (p) => node('group', p, { cases: p.cases });
-/** Group run in order: if a child fails, the remaining children are skipped; pre / after run once */
-export const TestSequence = (p) => node('sequence', p, { cases: p.cases });
+export const BistCase = (p) => node('case', p, { steps: p.steps ?? [] });
+/** Suite: independent children; pre / after run around each child. One script file = one root BistSuite. */
+export const BistSuite = (p) => node('suite', p, { units: p.units });
+/** Suite run in order: if a child fails, the remaining children are skipped; pre / after run once */
+export const BistSequence = (p) => node('sequence', p, { units: p.units });
 /** Script file JSON (root with schema) */
 export const toRootJson = (root) => ({ schema: SCHEMA, ...root });
 /** Prints the script file JSON – at the end of each `<id>.ts` file: `printJson(script)`. Throws on errors instead of printing. */

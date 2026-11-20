@@ -1,7 +1,9 @@
-/// Ready-made UI for BIST: [BistView] (scripts + reports) and [BistView.overlay] (the app plus a floating "BIST" button that
-/// opens [BistView] in a dialog). [BistView.units] / [BistView.reports] are the two sections, for embedding in your own
+/// Ready-made UI for BIST: [BistView] (scripts + results) and [BistView.overlay] (the app plus a floating "BIST" button that
+/// opens [BistView] in a dialog). [BistView.units] / [BistView.results] are the two sections, for embedding in your own
 /// debug screen. Plain Material, works in any app; texts come from [BistLocalizations] (English by default).
 library;
+
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -14,14 +16,14 @@ export 'logo.dart' show BistLogo, BistIcon;
 const _rowText = TextStyle(fontSize: 13, color: Color(0xFF222222));
 const _subText = TextStyle(fontSize: 11, color: Color(0xFF777777));
 
-/// Scripts (Test units) and run reports (Test reports) of [Bist.instance]:
+/// Scripts (Test units) and run results (Test results) of [Bist.instance]:
 ///
-/// - Test units: the script tree (name, tags). Tap a group to open / close it, **long-press** a node for the run dialog
+/// - Test units: the script tree (name, tags). Tap a suite to open / close it, **long-press** a node for the run dialog
 ///   (what it is, "Screenshot on failure", Run); ▶ in the header runs everything.
-/// - Test reports: one row per run (time · duration · counts, red when something failed); open it for the tree of what
-///   ran – "name ✓ 1.2s" for passed tests, the error in red under failed ones, tap a test for its steps.
+/// - Test results: one row per run (time · duration · counts, red when something failed); open it for the tree of what
+///   ran – "name ✓ 1.2s" for passed tests, the error in red under failed ones, tap a test for its result folder and logs.
 ///
-/// Scrollable; use [units] / [reports] to put the sections into your own list.
+/// Scrollable; use [units] / [results] to put the sections into your own list.
 class BistView extends StatelessWidget {
   /// Called before a run starts (e.g. close / minimize this view so the app screen is visible)
   final VoidCallback? onRun;
@@ -38,8 +40,8 @@ class BistView extends StatelessWidget {
   /// Test units section (not scrollable)
   static Widget units({VoidCallback? onRun, BistLocalizations? localizations}) => _UnitsSection(onRun: onRun, localizations: localizations);
 
-  /// Test reports section (not scrollable)
-  static Widget reports({BistLocalizations? localizations}) => _ReportsSection(localizations: localizations);
+  /// Test results section (not scrollable)
+  static Widget results({BistLocalizations? localizations}) => _ResultsSection(localizations: localizations);
 
   /// For `MaterialApp.builder`: the app plus a small draggable "BIST" button; tapping it opens [BistView] in a dialog,
   /// running a script closes the dialog. Shown when [enabled] (default: debug / profile builds).
@@ -63,7 +65,7 @@ class BistView extends StatelessWidget {
                 const Divider(height: 1),
                 units(onRun: onRun, localizations: text),
                 const Divider(height: 1),
-                reports(localizations: text),
+                results(localizations: text),
               ],
             ),
           ),
@@ -224,7 +226,7 @@ class _UnitsSection extends StatelessWidget {
 
   const _UnitsSection({required this.onRun, required this.localizations});
 
-  Future<void> _runAll(List<TestGroup> roots) async {
+  Future<void> _runAll(List<BistSuite> roots) async {
     onRun?.call();
     for (final r in roots) {
       await Bist.instance.run(r);
@@ -259,7 +261,7 @@ class _UnitsSection extends StatelessWidget {
                   padding: const EdgeInsets.only(left: 8, right: 4),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [for (final r in roots) _CaseRow(c: r, level: 0, onRun: onRun, text: text)],
+                    children: [for (final r in roots) _UnitRow(c: r, level: 0, onRun: onRun, text: text)],
                   ),
                 ),
         );
@@ -268,19 +270,19 @@ class _UnitsSection extends StatelessWidget {
   }
 }
 
-class _CaseRow extends StatefulWidget {
-  final TestCase c;
+class _UnitRow extends StatefulWidget {
+  final BistUnit c;
   final int level;
   final VoidCallback? onRun;
   final BistLocalizations text;
 
-  const _CaseRow({required this.c, required this.level, required this.onRun, required this.text});
+  const _UnitRow({required this.c, required this.level, required this.onRun, required this.text});
 
   @override
-  State<_CaseRow> createState() => _CaseRowState();
+  State<_UnitRow> createState() => _UnitRowState();
 }
 
-class _CaseRowState extends State<_CaseRow> {
+class _UnitRowState extends State<_UnitRow> {
   late bool _expanded = widget.level == 0;
 
   @override
@@ -290,13 +292,13 @@ class _CaseRowState extends State<_CaseRow> {
     final bist = Bist.instance;
     final version = bist.appVersion;
     final applies = version == null || c.appliesTo(version);
-    final group = c is TestGroup ? c : null;
-    final tags = [if (c is TestSequence) text.sequential, if (c.writes) text.writes, if (c.manual != null) text.needsTester, if (!applies) text.notApplicable];
+    final suite = c is BistSuite ? c : null;
+    final tags = [if (c is BistSequence) text.sequential, if (c.writes) text.writes, if (c.manual != null) text.needsTester, if (!applies) text.notApplicable];
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         InkWell(
-          onTap: group == null ? null : () => setState(() => _expanded = !_expanded),
+          onTap: suite == null ? null : () => setState(() => _expanded = !_expanded),
           onLongPress: () => _RunDialog.show(context, c, onRun: widget.onRun, text: text),
           child: Padding(
             padding: EdgeInsets.only(left: 12.0 * widget.level, top: 6, bottom: 6, right: 8),
@@ -304,7 +306,7 @@ class _CaseRowState extends State<_CaseRow> {
               children: [
                 SizedBox(
                   width: _Fold.chevron,
-                  child: group == null ? null : Icon(_expanded ? Icons.expand_more : Icons.chevron_right, size: 18, color: Colors.grey),
+                  child: suite == null ? null : Icon(_expanded ? Icons.expand_more : Icons.chevron_right, size: 18, color: Colors.grey),
                 ),
                 const SizedBox(width: 4),
                 Expanded(
@@ -324,17 +326,17 @@ class _CaseRowState extends State<_CaseRow> {
             ),
           ),
         ),
-        if (group != null && _expanded)
-          for (final child in group.cases) _CaseRow(c: child, level: widget.level + 1, onRun: widget.onRun, text: text),
+        if (suite != null && _expanded)
+          for (final child in suite.units) _UnitRow(c: child, level: widget.level + 1, onRun: widget.onRun, text: text),
       ],
     );
   }
 }
 
-class _ReportsSection extends StatelessWidget {
+class _ResultsSection extends StatelessWidget {
   final BistLocalizations? localizations;
 
-  const _ReportsSection({required this.localizations});
+  const _ResultsSection({required this.localizations});
 
   @override
   Widget build(BuildContext context) {
@@ -343,18 +345,18 @@ class _ReportsSection extends StatelessWidget {
     return ListenableBuilder(
       listenable: bist,
       builder: (context, _) => _Section(
-        title: text.reports,
-        count: bist.reports.length,
-        builder: (_) => bist.reports.isEmpty
+        title: text.results,
+        count: bist.results.length,
+        builder: (_) => bist.results.isEmpty
             ? Padding(
                 padding: const EdgeInsets.fromLTRB(12, 4, 16, 8),
-                child: Text(text.noReports, style: _subText),
+                child: Text(text.noResults, style: _subText),
               )
             : Padding(
                 padding: const EdgeInsets.only(left: 8),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [for (final r in bist.reports) _ReportTile(report: r, text: text)],
+                  children: [for (final r in bist.results) _ResultTile(result: r, text: text)],
                 ),
               ),
       ),
@@ -364,11 +366,11 @@ class _ReportsSection extends StatelessWidget {
 
 /// One run: name; second line "status icon time · duration · counts" (red when a test failed); opens to the tree of the
 /// node that was run.
-class _ReportTile extends StatelessWidget {
-  final BistResult report;
+class _ResultTile extends StatelessWidget {
+  final BistResult result;
   final BistLocalizations text;
 
-  const _ReportTile({required this.report, required this.text});
+  const _ResultTile({required this.result, required this.text});
 
   String _time(DateTime t) {
     String two(int n) => n.toString().padLeft(2, '0');
@@ -380,28 +382,28 @@ class _ReportTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
-      listenable: report,
+      listenable: result,
       builder: (context, _) {
         final counts = [
           for (final x in BistStatus.values)
-            if (x != BistStatus.running && report.count(x) > 0) '${text.status(x)} ${report.count(x)}',
+            if (x != BistStatus.running && x != BistStatus.none && result.count(x) > 0) '${text.status(x)} ${result.count(x)}',
         ].join(' · ');
-        final line = [_time(report.time), report.done ? _duration(report.duration) : text.inProgress, if (counts.isNotEmpty) counts].join(' · ');
-        final failed = report.units.any((u) => u.status.isFailure);
+        final line = [_time(result.time), result.done ? _duration(result.duration) : text.inProgress, if (counts.isNotEmpty) counts].join(' · ');
+        final failed = result.cases.any((u) => u.status.isFailure);
         return _Fold(
           padding: const EdgeInsets.only(left: 4, right: 8, top: 4, bottom: 4),
-          initiallyOpen: !report.done,
+          initiallyOpen: !result.done,
           header: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '${report.number}. ${report.target.name}',
+                '${Bist.instance.numberOf(result.target)}. ${result.target.name}',
                 style: _rowText.copyWith(fontWeight: failed ? FontWeight.w600 : null, color: failed ? Colors.red : null),
               ),
-              _statusLine(report.status, line, failed ? _subText.copyWith(color: Colors.red) : _subText),
+              _statusLine(result.status, line, failed ? _subText.copyWith(color: Colors.red) : _subText),
             ],
           ),
-          children: [..._ReportTree(report, text).nodes(report.target, 1), const SizedBox(height: 6)],
+          children: [for (final r in result.children) ..._ResultTree(result, text).node(r, 1), const SizedBox(height: 6)],
         );
       },
     );
@@ -416,67 +418,58 @@ String _duration(Duration d) {
   return '${d.inMinutes}m ${(d.inSeconds % 60).toString().padLeft(2, '0')}s';
 }
 
-/// Result tree of one run, shaped like the script (the root is the node that was run)
-class _ReportTree {
-  final BistResult report;
+/// Result tree of one run ([BistResult] children of the root: suites on the way to the node that was run, everything in it)
+class _ResultTree {
+  final BistResult result;
   final BistLocalizations text;
 
-  _ReportTree(this.report, this.text);
+  _ResultTree(this.result, this.text);
 
-  BistUnitResult? resultOf(TestUnit u) => report.units.where((r) => identical(r.unit, u)).lastOrNull;
-
-  /// [c] is the node that was run: its children (its name is already in the header), or itself for a test
-  List<Widget> nodes(TestCase c, int level) {
-    if (c is TestUnit) return [_unit(c, level)];
-    return [for (final x in (c as TestGroup).cases) ..._node(x, level)];
-  }
-
-  List<Widget> _node(TestCase c, int level) {
-    if (c is! TestGroup) return [_unit(c as TestUnit, level)];
-    final hasError = c.units.any((u) => resultOf(u)?.status.isFailure ?? false);
+  List<Widget> node(BistResult r, int level) {
+    if (r.isCase) return [_case(r, level)];
+    final hasError = r.status.isFailure;
     return [
       _Fold(
         padding: EdgeInsets.only(left: 4 + 14.0 * level, right: 8, top: 3, bottom: 3),
         initiallyOpen: true,
         header: Text(
-          '${Bist.instance.numberOf(c)}. ${c.name}',
+          '${r.number}. ${r.unit.name}',
           style: _rowText.copyWith(fontWeight: hasError ? FontWeight.w600 : null, color: hasError ? Colors.red : null),
         ),
-        children: [for (final x in c.cases) ..._node(x, level + 1)],
+        children: [for (final x in r.children) ...node(x, level + 1)],
       ),
     ];
   }
 
-  Widget _unit(TestUnit u, int level) {
-    final r = resultOf(u);
+  Widget _case(BistResult r, int level) {
     final pad = EdgeInsets.only(left: 4 + 14.0 * level, right: 8);
-    if (r == null) {
+    if (r.status == BistStatus.none) {
       return Padding(
         padding: pad.add(const EdgeInsets.only(left: _Fold.chevron, top: 3, bottom: 3)),
         child: Text.rich(
           TextSpan(
             children: [
               TextSpan(
-                text: '${Bist.instance.numberOf(u)}. ${u.name}',
+                text: '${r.number}. ${r.unit.name}',
                 style: _rowText.copyWith(color: Colors.grey),
               ),
-              TextSpan(text: '  · ${report.done ? text.notReached : text.waiting}', style: _subText),
+              TextSpan(text: '  · ${result.done ? text.notReached : text.waiting}', style: _subText),
             ],
           ),
         ),
       );
     }
-    return _UnitTile(result: r, padding: pad, text: text);
+    return _CaseTile(result: r, padding: pad, text: text);
   }
 }
 
-/// A test in the result tree: "name ✓ 1.2s"; running / failed / needs a tester get a second line. Tap for its steps.
-class _UnitTile extends StatelessWidget {
-  final BistUnitResult result;
+/// A test in the result tree: "name ✓ 1.2s"; running / failed / needs a tester get a second line. Tap for its result folder and logs.
+class _CaseTile extends StatelessWidget {
+  final BistResult result;
   final EdgeInsets padding;
   final BistLocalizations text;
 
-  const _UnitTile({required this.result, required this.padding, required this.text});
+  const _CaseTile({required this.result, required this.padding, required this.text});
 
   @override
   Widget build(BuildContext context) {
@@ -494,7 +487,7 @@ class _UnitTile extends StatelessWidget {
         };
         return _Fold(
           padding: padding.add(const EdgeInsets.symmetric(vertical: 3)),
-          canExpand: r.steps.isNotEmpty,
+          canExpand: done && r.dir != null,
           header: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -521,32 +514,39 @@ class _UnitTile extends StatelessWidget {
             ],
           ),
           children: [
-            for (final st in r.steps)
+            if (r.dir != null)
               Padding(
                 padding: padding.add(const EdgeInsets.only(left: _Fold.chevron + 4, bottom: 4)),
-                child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Icon(st.ok ? Icons.check : Icons.close, size: 12, color: st.ok ? Colors.green : Colors.red),
-                    const SizedBox(width: 4),
-                    Expanded(
-                      child: Text(
-                        [
-                          '${st.label}. ${st.cmd}  ${_duration(Duration(milliseconds: st.ms))}',
-                          if (st.error != null) '→ ${st.error}',
-                          if (st.appErrors.isNotEmpty) '${text.appErrors}: ${st.appErrors.join(', ')}',
-                          if (st.screen.isNotEmpty) '${text.screen}: ${st.screen.take(12).join(' | ')}',
-                          if (st.shot != null) '${text.shot}: ${st.shot}',
-                        ].join('\n'),
-                        style: _subText.copyWith(color: st.ok ? null : Colors.red),
-                      ),
-                    ),
-                  ],
-                ),
+                child: _CaseFiles(dir: r.dir!, text: text),
               ),
           ],
         );
       },
+    );
+  }
+}
+
+/// Files of a test's result folder: the folder path, then `pre.log` / `step.log` / `after.log`
+class _CaseFiles extends StatelessWidget {
+  final String dir;
+  final BistLocalizations text;
+
+  const _CaseFiles({required this.dir, required this.text});
+
+  Future<String> _read() async {
+    final parts = <String>[];
+    for (final phase in const ['pre', 'step', 'after']) {
+      final f = File('$dir/$phase.log');
+      if (await f.exists()) parts.add('[$phase]\n${(await f.readAsString()).trimRight()}');
+    }
+    return parts.join('\n');
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return FutureBuilder<String>(
+      future: _read(),
+      builder: (context, snap) => SelectableText(['${text.folder}: $dir', if (snap.data?.isNotEmpty ?? false) snap.data!].join('\n'), style: _subText),
     );
   }
 }
@@ -602,14 +602,14 @@ class _FoldState extends State<_Fold> {
 /// Run dialog (long-press in Test units): what the node is, run options, Run. Inserted into the nearest [Overlay], so it
 /// also works above the app's Navigator (debug panels, [BistView.overlay]).
 class _RunDialog extends StatefulWidget {
-  final TestCase c;
+  final BistUnit c;
   final VoidCallback onClose;
   final VoidCallback? onRun;
   final BistLocalizations text;
 
   const _RunDialog({required this.c, required this.onClose, required this.onRun, required this.text});
 
-  static void show(BuildContext context, TestCase c, {VoidCallback? onRun, required BistLocalizations text}) {
+  static void show(BuildContext context, BistUnit c, {VoidCallback? onRun, required BistLocalizations text}) {
     OverlayEntry? e;
     e = OverlayEntry(
       builder: (_) => _RunDialog(c: c, onClose: () => e?.remove(), onRun: onRun, text: text),
@@ -622,7 +622,7 @@ class _RunDialog extends StatefulWidget {
 }
 
 class _RunDialogState extends State<_RunDialog> {
-  TestCase get c => widget.c;
+  BistUnit get c => widget.c;
 
   /// Compact checkbox, ~10 dp to its label (CheckboxListTile leaves a wide gap)
   Widget _check(String label, bool value, void Function(bool v) set) => InkWell(
@@ -655,13 +655,13 @@ class _RunDialogState extends State<_RunDialog> {
     final bist = Bist.instance;
     final text = widget.text;
     final c = this.c;
-    final units = c is TestGroup ? c.units : [c as TestUnit];
+    final units = c is BistSuite ? c.cases : [c as BistCase];
     final version = bist.appVersion;
     final tester = units.where((u) => u.needsTester).length;
     final info = [
       switch (c) {
-        TestSequence() => text.sequence,
-        TestGroup() => text.group,
+        BistSequence() => text.sequence,
+        BistSuite() => text.suite,
         _ => text.test,
       },
       if (c.id != null) 'id: ${c.id}',
@@ -844,13 +844,13 @@ class _ButtonIcon extends StatelessWidget {
           child: InkWell(customBorder: const CircleBorder(), onTap: onTap, child: const BistIcon(size: 44)),
         ),
         // Share of the tests already run
-        if (running && Bist.instance.reports.isNotEmpty)
+        if (running && Bist.instance.results.isNotEmpty)
           ListenableBuilder(
-            listenable: Bist.instance.reports.first,
+            listenable: Bist.instance.results.first,
             builder: (context, _) => SizedBox.square(
               dimension: 52,
               child: CircularProgressIndicator(
-                value: Bist.instance.reports.first.progress,
+                value: Bist.instance.results.first.progress,
                 strokeWidth: 3,
                 color: const Color(0xFF2EB84F),
                 backgroundColor: const Color(0x332EB84F),

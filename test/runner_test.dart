@@ -9,6 +9,10 @@ import 'package:flutter_test/flutter_test.dart';
 /// Provider of the tests: fake HTTP client, logs, test data, servers, a custom widget
 class _TestProvider extends BistProvider {
   bool production = false;
+  final _tmp = Directory.systemTemp.createTempSync('bist_test');
+
+  @override
+  Future<Directory> tempDir() async => _tmp;
   BistNetworkHook? hook;
   final logs = <void Function(BistLog)>[];
   String? server = 'DEV';
@@ -55,7 +59,7 @@ class _TestProvider extends BistProvider {
   List<String?>? textsOf(Widget w) => w is _IconOnlyButton ? [w.label] : null;
 
   @override
-  bool? isButton(Widget w) => w is _IconOnlyButton ? true : null;
+  WidgetType? widgetOf(Widget w) => w is _IconOnlyButton ? WidgetType.button : super.widgetOf(w);
 }
 
 final _provider = _TestProvider();
@@ -84,8 +88,8 @@ void main() {
   }
 
   /// Runs [c] (inside a new root group), pumping frames until it ends
-  Future<BistResult> run(WidgetTester tester, TestCase c) async {
-    Bist.instance.add(TestGroup(id: 'g${gid++}', name: 'Test group', cases: [c]));
+  Future<BistResult> run(WidgetTester tester, BistUnit c) async {
+    Bist.instance.add(BistSuite(id: 'g${gid++}', name: 'Test group', units: [c]));
     BistResult? rs;
     Bist.instance.run(c).then((r) => rs = r).ignore();
     // Runner timeouts use real time: pump until done (at most 20 real seconds)
@@ -97,10 +101,13 @@ void main() {
     return rs!;
   }
 
-  Future<BistResult> runSteps(WidgetTester tester, List<TestAction> steps, {bool writes = false}) =>
-      run(tester, TestUnit(name: 'Test', steps: steps, writes: writes));
+  Future<BistResult> runSteps(WidgetTester tester, List<BistAction> steps, {bool writes = false}) =>
+      run(tester, BistCase(name: 'Test', steps: steps, writes: writes));
 
-  String? firstError(BistResult r) => r.units.expand((u) => u.steps).where((s) => !s.ok).firstOrNull?.error;
+  String? firstError(BistResult r) => r.cases.where((u) => u.status.isFailure).firstOrNull?.error;
+
+  /// Content of `<phase>.log` in the folder of the only test of [r]
+  String log(BistResult r, String phase) => File('${r.cases.single.dir}/$phase.log').readAsStringSync();
 
   group('Text match', () {
     testWidgets('contains: part of the text', (tester) async {
@@ -179,6 +186,33 @@ void main() {
       expect(firstError(r), contains('checked false'));
     });
 
+    testWidgets('type: checkbox / radio / dropdown', (tester) async {
+      await setUpScreen(
+        tester,
+        Column(
+          children: [
+            CheckboxListTile(title: const Text('Remember me'), value: true, onChanged: (_) {}),
+            // ignore: deprecated_member_use
+            RadioListTile<int>(title: const Text('Option B'), value: 2, groupValue: 2, onChanged: (_) {}),
+            DropdownButton<String>(
+              value: 'Leave',
+              items: const [DropdownMenuItem(value: 'Leave', child: Text('Leave'))],
+              onChanged: (_) {},
+            ),
+            const Text('Plain'),
+          ],
+        ),
+      );
+      final r = await runSteps(tester, [
+        b.expect(text: 'Remember me', type: WidgetType.checkbox, checked: true, timeout: 500),
+        b.expect(text: 'Option B', type: WidgetType.radio, checked: true, timeout: 500),
+        b.expect(text: 'Leave', type: WidgetType.dropdown, timeout: 500),
+        b.notExpect(text: 'Plain', type: WidgetType.checkbox, timeout: 300),
+        b.notExpect(text: 'Remember me', type: WidgetType.radio, timeout: 300),
+      ]);
+      expect(r.status, BistStatus.passed, reason: firstError(r));
+    });
+
     testWidgets('selected chip', (tester) async {
       await setUpScreen(
         tester,
@@ -235,21 +269,21 @@ void main() {
       await setUpScreen(tester, const Center(child: Text('Home')));
       final r = await run(
         tester,
-        TestSequence(
+        BistSequence(
           name: 'Sequence',
-          cases: [
-            TestUnit(
+          units: [
+            BistCase(
               name: 'Fails',
               steps: [b.expect(text: 'Missing', timeout: 200)],
             ),
-            TestUnit(
+            BistCase(
               name: 'After',
               steps: [b.expect(text: 'Home', timeout: 200)],
             ),
           ],
         ),
       );
-      expect(r.units.map((u) => u.status).toList(), [BistStatus.failed, BistStatus.skipped]);
+      expect(r.cases.map((u) => u.status).toList(), [BistStatus.failed, BistStatus.skipped]);
     });
 
     testWidgets('finds text above the Navigator (app notification layer)', (tester) async {
@@ -321,17 +355,80 @@ void main() {
         b.log('uid = {{uid}}'),
       ]);
       expect(r.status, BistStatus.passed, reason: firstError(r));
-      expect(r.units.single.steps.last.cmd, contains('uid = 42'));
+      expect(log(r, 'step').trim().split('\n').last, contains('uid = 42'));
     });
 
     testWidgets('server switch through the provider', (tester) async {
       await setUpScreen(tester, const Center(child: Text('Home')));
       final r = await runSteps(tester, [b.server('DEV'), b.getEnv('s', 'server.name'), b.log('{{s}}')]);
       expect(r.status, BistStatus.passed, reason: firstError(r));
-      expect(r.units.single.steps.last.cmd, contains('DEV'));
+      expect(log(r, 'step').trim().split('\n').last, contains('DEV'));
     });
 
-    testWidgets('custom widget: textsOf / isButton from the provider', (tester) async {
+    testWidgets('result tree: the root is the top suite, with tests run before the target and the target\'s nodes', (tester) async {
+      await setUpScreen(tester, const Center(child: Text('Home')));
+      final target = BistSequence(
+        name: 'Inner',
+        units: [
+          BistCase(name: 'B', steps: [b.wait(10)]),
+          BistCase(name: 'C', steps: [b.expect(text: 'Missing', timeout: 200)]),
+          BistCase(name: 'D', steps: [b.wait(10)]),
+        ],
+      );
+      final top = BistSequence(id: 'g${gid++}', name: 'Tree', units: [BistCase(name: 'A', steps: [b.wait(10)]), target]);
+      Bist.instance.add(top);
+      BistResult? rs;
+      Bist.instance.run(target).then((x) => rs = x).ignore();
+      final until = DateTime.now().add(const Duration(seconds: 20));
+      while (rs == null && DateTime.now().isBefore(until)) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      final r = rs!;
+      expect(r.unit, same(top));
+      expect(r.target, same(target));
+      expect(r.children.map((c) => c.unit.name), ['A', 'Inner']);
+      expect(r.cases.map((c) => c.status), [BistStatus.passed, BistStatus.passed, BistStatus.failed, BistStatus.skipped]);
+      expect(r.find(target)!.status, BistStatus.failed);
+      expect(r.status, BistStatus.failed);
+      expect(r.progress, 1);
+      expect(r.find(target)!.children.map((c) => c.number), [for (final n in [1, 2, 3]) '${Bist.instance.numberOf(target)}.$n']);
+    });
+
+    testWidgets('result folder: <run>/<number>/ with pre / step / after.log and error.log; a suite pre goes to the next test', (tester) async {
+      await setUpScreen(tester, const Center(child: Text('Home')));
+      final c = BistCase(
+        name: 'Fails',
+        pre: [b.log('case pre')],
+        steps: [b.log('one'), b.expect(text: 'Missing', timeout: 200)],
+        after: [b.log('clean up')],
+      );
+      Bist.instance.add(BistSuite(id: 'g${gid++}', name: 'Folder', pre: [b.log('suite pre')], units: [c]));
+      BistResult? rs;
+      Bist.instance.run(c).then((x) => rs = x).ignore();
+      final until = DateTime.now().add(const Duration(seconds: 20));
+      while (rs == null && DateTime.now().isBefore(until)) {
+        await tester.pump(const Duration(milliseconds: 50));
+      }
+      final r = rs!;
+      expect(r.status, BistStatus.failed);
+      final number = r.cases.single.number;
+      expect(r.cases.single.dir, '${r.dir}/$number');
+      expect(RegExp(r'/bist/\d{4}-\d\d-\d\d \d\d-\d\d-\d\d( \(\d+\))?$').hasMatch(r.dir!), isTrue, reason: r.dir);
+      final pre = log(r, 'pre');
+      expect(pre, contains('suite pre'));
+      expect(pre, contains('_1 ✓ log')); // the suite's action: <suite number>_1
+      expect(pre, contains('1 ✓ log "case pre"'));
+      final step = log(r, 'step');
+      expect(step, contains('1 ✓ log "one"'));
+      expect(step, contains('2 ✗ expect'));
+      expect(step, contains('→ Not found'));
+      expect(log(r, 'after'), contains('clean up'));
+      final error = File('${r.cases.single.dir}/error.log').readAsStringSync().trim();
+      expect(error, r.cases.single.error);
+      expect(error, startsWith('Not found'));
+    });
+
+    testWidgets('custom widget: textsOf / widgetOf from the provider', (tester) async {
       var taps = 0;
       await setUpScreen(
         tester,
@@ -386,11 +483,11 @@ void main() {
 
   group('Script check', () {
     test('new commands: JSON round trip', () {
-      final g = TestGroup(
+      final g = BistSuite(
         id: 'v',
         name: 'v',
-        cases: [
-          TestUnit(
+        units: [
+          BistCase(
             name: 'u',
             steps: [
               b.expect(text: 'Order', match: TextMatch.contains, count: 2, checked: true, selected: false),
@@ -401,14 +498,14 @@ void main() {
           ),
         ],
       );
-      final back = TestGroup.decode(g.encode());
+      final back = BistSuite.decode(g.encode());
       expect(back.encode(), g.encode());
     });
 
     test('JSON made by bist.ts (the editor): the Dart model reads it and writes it back the same', () {
       // fixtures/bist_parity.json is generated from tools/editor/bist.ts – keeps the TS and Dart checks in sync
       final text = File('test/fixtures/bist_parity.json').readAsStringSync();
-      final g = TestGroup.decode(text);
+      final g = BistSuite.decode(text);
       expect(jsonDecode(g.encode()), jsonDecode(text));
     });
 
@@ -423,18 +520,18 @@ void main() {
 
   group('Tests that need a tester', () {
     test('needsTester: manual, confirm / ask in steps, loops or the pre / after of a group', () {
-      final manual = TestUnit(name: 'm', manual: 'Face ID');
-      final confirm = TestUnit(name: 'c', steps: [b.confirm('Did it ring?')]);
-      final inLoop = TestUnit(
+      final manual = BistCase(name: 'm', manual: 'Face ID');
+      final confirm = BistCase(name: 'c', steps: [b.confirm('Did it ring?')]);
+      final inLoop = BistCase(
         name: 'l',
         steps: [
           b.loop(1, 2, [b.ask('code', 'OTP?')]),
         ],
       );
-      final plain = TestUnit(name: 'p', steps: [b.wait(1)]);
-      final underPre = TestUnit(name: 'u', steps: [b.wait(1)]);
-      TestGroup(name: 'g', pre: [b.confirm('Ready?')], cases: [underPre]);
-      TestGroup(name: 'root', cases: [manual, confirm, inLoop, plain]);
+      final plain = BistCase(name: 'p', steps: [b.wait(1)]);
+      final underPre = BistCase(name: 'u', steps: [b.wait(1)]);
+      BistSuite(name: 'g', pre: [b.confirm('Ready?')], units: [underPre]);
+      BistSuite(name: 'root', units: [manual, confirm, inLoop, plain]);
       expect([manual, confirm, inLoop, plain, underPre].map((u) => u.needsTester), [true, true, true, false, true]);
     });
 
@@ -443,19 +540,19 @@ void main() {
       Bist.instance.skipTester = true;
       final r = await run(
         tester,
-        TestGroup(
+        BistSuite(
           name: 'Mixed',
-          cases: [
-            TestUnit(name: 'Asks', steps: [b.confirm('Did it ring?')]),
-            TestUnit(
+          units: [
+            BistCase(name: 'Asks', steps: [b.confirm('Did it ring?')]),
+            BistCase(
               name: 'Plain',
               steps: [b.expect(text: 'Home', timeout: 500)],
             ),
           ],
         ),
       );
-      expect(r.units.map((u) => u.status), [BistStatus.skipped, BistStatus.passed]);
-      expect(r.units.first.error, contains('needs a tester'));
+      expect(r.cases.map((u) => u.status), [BistStatus.skipped, BistStatus.passed]);
+      expect(r.cases.first.error, contains('needs a tester'));
     });
   });
 }

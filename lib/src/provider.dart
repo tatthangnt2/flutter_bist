@@ -8,12 +8,12 @@ class BistUnsupportedError extends UnsupportedError {
   BistUnsupportedError(this.feature) : super('$feature is not supported by this app (override it in its BistProvider)');
 }
 
-/// One app log line, for `expectLog`, `getLog` and the "app errors" of a report
+/// One app log line, for `expectLog`, `getLog` and the "app errors" in the logs
 class BistLog {
   /// Short text to search in, e.g. `POST /api/login`
   final String tag;
 
-  /// `debug`, `info`, `warn`, `error`, `damage`, `success` (see `LogLevel` in `model.dart`)
+  /// `debug`, `info`, `warn`, `error`, `damage`, `success` (see `LogLevel` in `unit.dart`)
   final String level;
   final DateTime time;
 
@@ -22,7 +22,7 @@ class BistLog {
 
   const BistLog(this.tag, {this.level = 'info', required this.time, this.data});
 
-  /// Error-level log (counted as an app error in the report)
+  /// Error-level log (written as an app error in the logs)
   bool get isError => level == 'error' || level == 'damage';
 }
 
@@ -131,7 +131,7 @@ class BistProvider {
   /// The current server is production – scripts that write data are refused. Default `false`.
   bool get isProduction => false;
 
-  /// Name of the current server (shown in reports and the [BistView] header)
+  /// Name of the current server (shown in Test results and the [BistView] header)
   String? get serverName => null;
 
   /// Switches to server [name] and waits until the app uses it; returns an error message or `null`
@@ -160,25 +160,32 @@ class BistProvider {
 
   // ── File picking (`pickFile`) ──
 
-  /// Queues the file at [url] for the next file / image picker of the app; returns a short description for the report
+  /// Queues the file at [url] for the next file / image picker of the app; returns a short description for the log
   Future<String> addPickFile(String url, {String? name}) async => throw BistUnsupportedError('pickFile');
 
   /// Restores the real pickers at the end of the run; returns how many queued files were never used
   int closePickFiles() => 0;
 
-  // ── Custom widgets: `null` = not mine, the built-in Material / Cupertino reader decides ──
+  // ── Custom widgets: [widgetOf]; the others return `null` = not mine, the built-in Material / Cupertino reader decides ──
 
   /// Texts used to find [w]: visible text, tooltip, label / hint of an input…
   List<String?>? textsOf(Widget w) => null;
 
-  /// [w] is a tappable button (for `type: button`)
-  bool? isButton(Widget w) => null;
-
-  /// [w] is a text input (for `type: input` and the input next to a label)
-  bool? isInput(Widget w) => null;
-
-  /// [w] is an image / icon (for `type: image`)
-  bool? isImage(Widget w) => null;
+  /// Kind of [w] (`null`: none of them) – used by `type:`, finding the button around a text / icon, the input next to a
+  /// label and the dropdown of `input(value)`. Default: Material / Cupertino widgets. Custom widgets: override and fall
+  /// back to `super.widgetOf(w)`.
+  WidgetType? widgetOf(Widget w) => switch (w) {
+    ButtonStyleButton() || IconButton() || FloatingActionButton() || CupertinoButton() => WidgetType.button,
+    InkWell() when w.onTap != null || w.onLongPress != null => WidgetType.button,
+    GestureDetector() when w.onTap != null || w.onLongPress != null => WidgetType.button,
+    TextField() || EditableText() => WidgetType.input,
+    Text() => WidgetType.text,
+    Image() || Icon() => WidgetType.image,
+    Checkbox() || CheckboxListTile() || CupertinoCheckbox() || Switch() || SwitchListTile() || CupertinoSwitch() => WidgetType.checkbox,
+    Radio() || RadioListTile() || CupertinoRadio() => WidgetType.radio,
+    DropdownButton() || DropdownMenu() => WidgetType.dropdown,
+    _ => null,
+  };
 
   /// Button / input [w] is enabled
   bool? isEnabled(Widget w) => null;
@@ -188,9 +195,6 @@ class BistProvider {
 
   /// Tab / chip / item [w] is selected
   bool? selectedOf(Widget w) => null;
-
-  /// [w] is a dropdown: `input(value)` taps it, then taps the item with text `value`
-  bool? isDropdown(Widget w) => null;
 
   /// `input` into a custom field: return a Future (error message or `null`) when you handled it, `null` to let BIST type
   /// into the field's `EditableText`

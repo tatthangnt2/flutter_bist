@@ -1,6 +1,6 @@
 // Exported to example/assets/bist/demo.json with
 // `node bin/bist.mjs example/scripts example/assets/bist` (needs `npm install` in tools/editor once).
-import { TestGroup, TestSequence, TestUnit, WidgetType, expect, input, nav, notExpect, tap, printJson } from 'flutter_bist';
+import { BistSuite, BistSequence, BistCase, WidgetType, expect, input, nav, notExpect, tap, printJson } from 'flutter_bist';
 
 const login = (user: string, pass: string) => [
   input(user, { text: 'Username' }),
@@ -9,25 +9,25 @@ const login = (user: string, pass: string) => [
 ];
 
 printJson(
-  TestGroup({
+  BistSuite({
     id: 'demo',
     name: 'Demo app',
-    cases: [
-      TestGroup({
+    units: [
+      BistSuite({
         id: 'login',
         name: 'Login',
         pre: [nav('/login')],
-        cases: [
-          TestUnit({ id: 'login.empty', name: 'Missing fields', steps: [...login('', ''), expect({ text: 'Please enter your username and password.' })] }),
-          TestUnit({ id: 'login.wrong', name: 'Wrong password', steps: [...login('alice', 'x'), expect({ text: 'Wrong password.' })] }),
+        units: [
+          BistCase({ id: 'login.empty', name: 'Missing fields', steps: [...login('', ''), expect({ text: 'Please enter your username and password.' })] }),
+          BistCase({ id: 'login.wrong', name: 'Wrong password', steps: [...login('alice', 'x'), expect({ text: 'Wrong password.' })] }),
         ],
       }),
-      TestSequence({
+      BistSequence({
         id: 'orders',
         name: 'Orders',
-        cases: [
-          TestUnit({ id: 'orders.open', name: 'Sign in', steps: [nav('/login'), ...login('alice', 'secret'), expect({ route: '/orders', timeout: 3000 })] }),
-          TestUnit({
+        units: [
+          BistCase({ id: 'orders.open', name: 'Sign in', steps: [nav('/login'), ...login('alice', 'secret'), expect({ route: '/orders', timeout: 3000 })] }),
+          BistCase({
             id: 'orders.add',
             name: 'Add an order',
             steps: [expect({ text: '^Order \\d+$', match: 'regex', count: 2 }), tap({ icon: 'add' }), expect({ text: 'Order 3' }), notExpect({ text: 'Order 4' })],

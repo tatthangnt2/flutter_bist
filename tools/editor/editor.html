@@ -7,7 +7,7 @@
 <!--
   BIST Editor. Double-click to open in Chrome / Edge (file://),
   no web server, no Node needed. Needs network access to load CodeMirror + TypeScript from cdnjs.
-  - A .bist file = compact JSON of one root script (TestGroup / TestSequence, schema 4) – sent straight to the app to run.
+  - A .bist file = compact JSON of one root script (BistSuite / BistSequence, schema 4) – sent straight to the app to run.
   - Left: project tree (name, id). Center: steps of the selected item as
     `export default { pre: [...], steps: [...], after: [...] }`. Right: properties. Bottom: Analysis (errors, warnings).
   The bist.ts library is embedded below (source in tools/editor; run `npm run build` there after editing bist.ts or this file).
@@ -76,7 +76,7 @@
   #tree .fill { flex: 1; }
   #tree li.root .nm { font-weight: 700; }
   #tree li.grp .nm { font-weight: 500; }
-  /* Item with errors: whole row red; group containing such an item: red dot */
+  /* Item with errors: whole row red; suite containing such an item: red dot */
   #tree li.err .nm, #tree li.err .num, #tree li.err .id, #tree li.err .badge { color: var(--err); }
   #tree .errdot { width: 6px; height: 6px; border-radius: 50%; background: var(--err); flex: none; margin-left: 2px; }
   #tree .more { opacity: 0; height: 24px; min-width: 24px; padding: 0 4px; }
@@ -387,7 +387,7 @@
     <b>BIST Editor</b><span class="ver" id="ver"></span><span class="sp"></span>
     <button class="ibtn" id="btnUndo" disabled title="Undo project change (Ctrl+Z outside the code)"><svg class="i"><use href="#i-undo"/></svg></button>
     <button class="ibtn" id="btnRedo" disabled title="Redo project change (Ctrl+Shift+Z / Ctrl+Y outside the code)"><svg class="i"><use href="#i-redo"/></svg></button>
-    <button class="ibtn" id="btnPlus" title="New group, test, or project"><svg class="i"><use href="#i-plus"/></svg></button>
+    <button class="ibtn" id="btnPlus" title="New suite, test, or project"><svg class="i"><use href="#i-plus"/></svg></button>
   </div>
   <ul id="tree" tabindex="0"></ul>
   <div class="split split-v" id="splitSide" title="Drag to resize"></div>
@@ -428,7 +428,7 @@
       </div>
       <div id="editorWrap" style="position:relative">
         <textarea id="editor"></textarea>
-        <div id="noNode" hidden><div>Select a group or test in the tree to edit its steps.</div></div>
+        <div id="noNode" hidden><div>Select a suite or test in the tree to edit its steps.</div></div>
         <div id="welcome">
           <div>
             <h2>BIST Editor</h2>
@@ -557,7 +557,7 @@ const BIST_PATH = '/node_modules/flutter_bist/index.ts';
 const LIB_PATH = '/lib.bist.d.ts';
 const NODE_PATH = '/node.ts';
 // Tool / tree-building functions of bist.ts – not suggested in the steps editor
-const HIDE = new Set(['transpile', 'typecheck', 'bundleMjs', 'validate', 'collectIds', 'toRootJson', 'MINI_LIB', 'SCHEMA', 'SECRET_PATTERN', 'VALUE_PATTERN', 'COMMANDS', 'printJson', 'TestGroup', 'TestUnit', 'TestSequence']);
+const HIDE = new Set(['transpile', 'typecheck', 'bundleMjs', 'validate', 'collectIds', 'toRootJson', 'MINI_LIB', 'SCHEMA', 'SECRET_PATTERN', 'VALUE_PATTERN', 'COMMANDS', 'printJson', 'BistSuite', 'BistCase', 'BistSequence']);
 const NON_CALL = new Set(['WidgetType', 'LogLevel', 'SwipeDirection']);
 // Positional parameters of each command (same as `FIELDS.main` in bist.ts); the rest go into the trailing object
 const MAIN = {
@@ -622,12 +622,12 @@ function stepCode(s, ind = '') {
   if (Object.keys(rest).length || NEED_OBJ.has(s.cmd)) args.push(objCode(rest, ind));
   return `${s.cmd}(${args.join(', ')})`;
 }
-const isGroup = (n) => n && n.type !== 'unit';
-const sections = (n) => (n.type === 'unit' ? ['pre', 'steps', 'after'] : ['pre', 'after']);
+const isSuite = (n) => n && n.type !== 'case';
+const sections = (n) => (n.type === 'case' ? ['pre', 'steps', 'after'] : ['pre', 'after']);
 const SECTION_NOTE = {
-  pre: (n) => (n.type === 'unit' ? 'Preconditions – run before the steps' : n.type === 'sequence' ? 'Preconditions – run once before the whole sequence' : 'Preconditions – run before EACH child'),
+  pre: (n) => (n.type === 'case' ? 'Preconditions – run before the steps' : n.type === 'sequence' ? 'Preconditions – run once before the whole sequence' : 'Preconditions – run before EACH child'),
   steps: () => 'Test steps',
-  after: (n) => (n.type === 'unit' ? 'Cleanup – run after the steps' : n.type === 'sequence' ? 'Cleanup – run once after the whole sequence' : 'Cleanup – run after EACH child'),
+  after: (n) => (n.type === 'case' ? 'Cleanup – run after the steps' : n.type === 'sequence' ? 'Cleanup – run once after the whole sequence' : 'Cleanup – run after EACH child'),
 };
 function nodeCode(n) {
   return 'export default {\n' + sections(n).map((sec) => `  // ${SECTION_NOTE[sec](n)}\n  ${sec}: ${listCode(n[sec] ?? [], '  ')},\n`).join('') + '};\n';
@@ -639,7 +639,7 @@ function evalNodeCode(code, n) {
   const r = new Function(...bistNames, body)(...bistNames.map((k) => bistLib[k]));
   if (!r || typeof r !== 'object' || Array.isArray(r)) throw new Error('`export default` must be an object { pre, steps, after }');
   const allowed = sections(n);
-  for (const k of Object.keys(r)) if (!allowed.includes(k)) throw new Error(`Unknown block "${k}" – a ${n.type === 'unit' ? 'test' : 'group'} only has ${allowed.join(', ')}`);
+  for (const k of Object.keys(r)) if (!allowed.includes(k)) throw new Error(`Unknown block "${k}" – a ${n.type === 'case' ? 'test' : 'suite'} only has ${allowed.join(', ')}`);
   const out = {};
   for (const k of allowed) {
     const v = r[k] ?? [];
@@ -653,7 +653,7 @@ function evalNodeCode(code, n) {
 // ===== Tree =====
 function walk(n, fn, num = '', parent = null, depth = 0) {
   fn(n, num, parent, depth);
-  if (isGroup(n)) n.cases.forEach((c, i) => walk(c, fn, num ? `${num}.${i + 1}` : `${i + 1}`, n, depth + 1));
+  if (isSuite(n)) n.units.forEach((c, i) => walk(c, fn, num ? `${num}.${i + 1}` : `${i + 1}`, n, depth + 1));
 }
 const parentOf = (t) => { let p = null; walk(root, (n, _x, par) => { if (n === t) p = par; }); return p; };
 const numberOf = (t) => { let r = ''; walk(root, (n, num) => { if (n === t) r = num; }); return r; };
@@ -671,10 +671,10 @@ function renderTree() {
   walk(root, (n, num, parent, depth) => {
     if (parent && (hidden.has(parent) || collapsed.has(parent))) { hidden.add(n); return; }
     const li = document.createElement('li');
-    const bad = hasError(n), inner = !bad && isGroup(n) && childHasError(n);
-    li.className = [n === sel ? 'on' : '', n === root ? 'root' : isGroup(n) ? 'grp' : '', bad ? 'err' : ''].join(' ');
+    const bad = hasError(n), inner = !bad && isSuite(n) && childHasError(n);
+    li.className = [n === sel ? 'on' : '', n === root ? 'root' : isSuite(n) ? 'grp' : '', bad ? 'err' : ''].join(' ');
     li.style.paddingLeft = depth * 16 + 4 + 'px';
-    const hasKids = isGroup(n) && n.cases.length;
+    const hasKids = isSuite(n) && n.units.length;
     li.innerHTML = `<span class="tw ${hasKids && !collapsed.has(n) ? 'open' : ''}">${hasKids ? icon('chev') : ''}</span>` +
       `<span class="num"></span><span class="nm"></span><span class="id"></span><span class="badge"></span><span class="fill"></span>` +
       `<button class="ibtn more" title="Actions">${icon('more')}</button>`;
@@ -683,7 +683,7 @@ function renderTree() {
     li.querySelector('.id').textContent = n.id ? `#${n.id}` : '';
     li.querySelector('.badge').textContent = [n.writes ? '✎' : '', n.manual ? '✋' : '', bad ? '⚠' : ''].join(' ');
     if (inner) { const d = document.createElement('span'); d.className = 'errdot'; d.title = 'Contains items with errors'; li.querySelector('.badge').after(d); }
-    li.title = [n.type === 'unit' ? 'Test' : n.type === 'sequence' ? 'Sequence (runs in order)' : 'Group', n.writes ? 'writes data' : '', n.manual ? 'manual: ' + n.manual : '', ...(errNodes.get(n) ?? [])].filter(Boolean).join('\n');
+    li.title = [n.type === 'case' ? 'Test' : n.type === 'sequence' ? 'Sequence (runs in order)' : 'Suite', n.writes ? 'writes data' : '', n.manual ? 'manual: ' + n.manual : '', ...(errNodes.get(n) ?? [])].filter(Boolean).join('\n');
     li.querySelector('.tw').onclick = (e) => { e.stopPropagation(); toggle(n); };
     li.querySelector('.more').onclick = (e) => {
       e.stopPropagation();
@@ -698,7 +698,7 @@ function renderTree() {
     if (n === sel) requestAnimationFrame(() => li.scrollIntoView({ block: 'nearest' }));
   });
 }
-function toggle(n) { if (!isGroup(n) || !n.cases.length) return; if (collapsed.has(n)) collapsed.delete(n); else collapsed.add(n); renderTree(); }
+function toggle(n) { if (!isSuite(n) || !n.units.length) return; if (collapsed.has(n)) collapsed.delete(n); else collapsed.add(n); renderTree(); }
 
 function uniqueId(base) {
   const ids = new Set(); walk(root, (n) => n.id && ids.add(n.id));
@@ -709,18 +709,18 @@ function uniqueId(base) {
 function addNode(type, at = sel ?? root) {
   if (!root) return;
   commitEditor();
-  const n = type === 'unit' ? { type: 'unit', name: 'New test', steps: [] } : { type: 'group', name: 'New group', cases: [] };
-  if (isGroup(at)) { at.cases.push(n); collapsed.delete(at); }
-  else { const p = parentOf(at); p.cases.splice(p.cases.indexOf(at) + 1, 0, n); }
+  const n = type === 'case' ? { type: 'case', name: 'New test', steps: [] } : { type: 'suite', name: 'New suite', units: [] };
+  if (isSuite(at)) { at.units.push(n); collapsed.delete(at); }
+  else { const p = parentOf(at); p.units.splice(p.units.indexOf(at) + 1, 0, n); }
   changed(); select(n);
   setTimeout(() => { const f = $('p-name'); if (f) { if ($('work').classList.contains('noprops')) toggleProps(); f.focus(); f.select(); } }, 0);
 }
-function canMove(n, d) { const p = n && parentOf(n); if (!p) return false; const j = p.cases.indexOf(n) + d; return j >= 0 && j < p.cases.length; }
+function canMove(n, d) { const p = n && parentOf(n); if (!p) return false; const j = p.units.indexOf(n) + d; return j >= 0 && j < p.units.length; }
 function moveSel(d) {
   if (!canMove(sel, d)) return;
   commitEditor();
-  const p = parentOf(sel), i = p.cases.indexOf(sel);
-  p.cases.splice(i, 1); p.cases.splice(i + d, 0, sel);
+  const p = parentOf(sel), i = p.units.indexOf(sel);
+  p.units.splice(i, 1); p.units.splice(i + d, 0, sel);
   changed(); refreshCrumb();
 }
 const canOut = (n) => { const p = n && parentOf(n); return !!(p && parentOf(p)); };
@@ -728,15 +728,15 @@ function outdentSel() {
   if (!canOut(sel)) return;
   commitEditor();
   const p = parentOf(sel), gp = parentOf(p);
-  p.cases.splice(p.cases.indexOf(sel), 1); gp.cases.splice(gp.cases.indexOf(p) + 1, 0, sel);
+  p.units.splice(p.units.indexOf(sel), 1); gp.units.splice(gp.units.indexOf(p) + 1, 0, sel);
   changed(); refreshCrumb();
 }
-const prevGroup = (n) => { const p = n && parentOf(n); const prev = p && p.cases[p.cases.indexOf(n) - 1]; return isGroup(prev) ? prev : null; };
+const prevSuite = (n) => { const p = n && parentOf(n); const prev = p && p.units[p.units.indexOf(n) - 1]; return isSuite(prev) ? prev : null; };
 function indentSel() {
-  const prev = prevGroup(sel); if (!prev) return;
+  const prev = prevSuite(sel); if (!prev) return;
   commitEditor();
   const p = parentOf(sel);
-  p.cases.splice(p.cases.indexOf(sel), 1); prev.cases.push(sel); collapsed.delete(prev);
+  p.units.splice(p.units.indexOf(sel), 1); prev.units.push(sel); collapsed.delete(prev);
   changed(); refreshCrumb();
 }
 function duplicateSel() {
@@ -745,16 +745,16 @@ function duplicateSel() {
   const copy = JSON.parse(JSON.stringify(sel));
   walk(copy, (n) => { if (n.id) n.id = uniqueId(n.id); });
   copy.name = sel.name + ' (copy)';
-  p.cases.splice(p.cases.indexOf(sel) + 1, 0, copy);
+  p.units.splice(p.units.indexOf(sel) + 1, 0, copy);
   changed(); select(copy);
 }
 function deleteSel() {
   const p = sel && parentOf(sel); if (!p) return;
-  let count = 0; walk(sel, (n) => n.type === 'unit' && count++);
-  if (!confirm(`Delete "${sel.name}"${isGroup(sel) ? ` and the ${count} test(s) inside` : ''}?`)) return;
-  const i = p.cases.indexOf(sel);
-  p.cases.splice(i, 1); sel = null;
-  changed(); select(p.cases[Math.min(i, p.cases.length - 1)] ?? p);
+  let count = 0; walk(sel, (n) => n.type === 'case' && count++);
+  if (!confirm(`Delete "${sel.name}"${isSuite(sel) ? ` and the ${count} test(s) inside` : ''}?`)) return;
+  const i = p.units.indexOf(sel);
+  p.units.splice(i, 1); sel = null;
+  changed(); select(p.units[Math.min(i, p.units.length - 1)] ?? p);
 }
 
 // ===== Claude-style menu =====
@@ -785,16 +785,16 @@ document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeMenu(
 function nodeItems(n) {
   const isRoot = n === root;
   return [
-    { icon: 'folder', label: isGroup(n) ? 'Add group inside' : 'Add group below', run: () => addNode('group', n) },
-    { icon: 'test', label: isGroup(n) ? 'Add test inside' : 'Add test below', run: () => addNode('unit', n) },
+    { icon: 'folder', label: isSuite(n) ? 'Add suite inside' : 'Add suite below', run: () => addNode('suite', n) },
+    { icon: 'test', label: isSuite(n) ? 'Add test inside' : 'Add test below', run: () => addNode('case', n) },
     '-',
     { icon: 'edit', label: isRoot ? 'Rename project' : 'Rename', run: () => focusName(n) },
     { icon: 'copy', label: 'Duplicate', disabled: isRoot, run: duplicateSel },
     '-',
     { icon: 'up', label: 'Move up', key: 'Alt+↑', disabled: !canMove(n, -1), run: () => moveSel(-1) },
     { icon: 'dn', label: 'Move down', key: 'Alt+↓', disabled: !canMove(n, 1), run: () => moveSel(1) },
-    { icon: 'out', label: 'Move out of group', key: 'Alt+←', disabled: !canOut(n), run: outdentSel },
-    { icon: 'in', label: 'Move into group above', key: 'Alt+→', disabled: !prevGroup(n), run: indentSel },
+    { icon: 'out', label: 'Move out of suite', key: 'Alt+←', disabled: !canOut(n), run: outdentSel },
+    { icon: 'in', label: 'Move into suite above', key: 'Alt+→', disabled: !prevSuite(n), run: indentSel },
     '-',
     { icon: 'trash', label: 'Delete', key: 'Delete', danger: true, disabled: isRoot, run: deleteSel },
   ];
@@ -814,8 +814,8 @@ function plusItems() {
     ...reopen,
     { icon: 'plus', label: 'New project…', run: newFile },
     '-',
-    { icon: 'folder', label: 'New group', disabled: !root, run: () => addNode('group') },
-    { icon: 'test', label: 'New test', disabled: !root, run: () => addNode('unit') },
+    { icon: 'folder', label: 'New suite', disabled: !root, run: () => addNode('suite') },
+    { icon: 'test', label: 'New test', disabled: !root, run: () => addNode('case') },
     '-',
     { icon: 'save', label: 'Save', key: isMac ? '⌘S' : 'Ctrl+S', disabled: !root, run: () => save(false) },
     { icon: 'save', label: 'Save as…', disabled: !root, run: () => save(true) },
@@ -856,7 +856,7 @@ function loadEditor() {
   refreshCrumb();
   refreshDiagnostics();
   const lines = code.split('\n');
-  const at = Math.max(0, lines.findIndex((l) => l.startsWith(sel.type === 'unit' ? '  steps:' : '  pre:')));
+  const at = Math.max(0, lines.findIndex((l) => l.startsWith(sel.type === 'case' ? '  steps:' : '  pre:')));
   cm.setCursor({ line: at, ch: lines[at].length });
 }
 
@@ -888,11 +888,11 @@ function renderProps() {
   const f = $('propForm');
   if (!sel) { f.innerHTML = '<span class="muted">Nothing selected.</span>'; return; }
   const n = sel, isRoot = n === root;
-  const typeOpts = n.type === 'unit'
-    ? '<option value="unit">Test (TestUnit)</option>'
-    : '<option value="group">Group (TestGroup) – children run independently</option><option value="sequence">Sequence (TestSequence) – runs in order, stops on failure</option>';
+  const typeOpts = n.type === 'case'
+    ? '<option value="case">Test (BistCase)</option>'
+    : '<option value="suite">Suite (BistSuite) – children run independently</option><option value="sequence">Sequence (BistSequence) – runs in order, stops on failure</option>';
   f.innerHTML = `
-    <label>Type<select id="p-type" ${n.type === 'unit' ? 'disabled' : ''}>${typeOpts}</select></label>
+    <label>Type<select id="p-type" ${n.type === 'case' ? 'disabled' : ''}>${typeOpts}</select></label>
     <label>${isRoot ? 'Project name' : 'Name'} *<input type="text" id="p-name"></label>
     <label>Id${isRoot ? ' *' : ''}<input type="text" id="p-id" placeholder="e.g. login.ql – for runTest('…') / BIST_RUN_IDS"><span class="field-err" id="e-id"></span></label>
     <div class="row2">
@@ -932,8 +932,8 @@ function checkProps() {
   $('p-maxVersion').classList.toggle('bad-input', badMax);
   $('p-name').classList.toggle('bad-input', !n.name);
   let units = 0, steps = 0;
-  walk(n, (x) => { if (x.type === 'unit') { units++; steps += (x.steps ?? []).length; } });
-  $('propInfo').textContent = n.type === 'unit'
+  walk(n, (x) => { if (x.type === 'case') { units++; steps += (x.steps ?? []).length; } });
+  $('propInfo').textContent = n.type === 'case'
     ? plural((n.steps ?? []).length, 'step') + ((n.pre ?? []).length ? ' · ' + plural(n.pre.length, 'precondition') : '') + ((n.after ?? []).length ? ' · ' + plural(n.after.length, 'cleanup step') : '')
     : plural(units, 'test') + ' · ' + plural(steps, 'step');
 }
@@ -1047,7 +1047,7 @@ function goHistory(d) {
 }
 const undo = () => goHistory(-1), redo = () => goHistory(1);
 function openRoot(json, name, handle) {
-  if (!json || typeof json !== 'object' || (json.type !== 'group' && json.type !== 'sequence')) throw new Error('Not a BIST script (root must be a TestGroup / TestSequence)');
+  if (!json || typeof json !== 'object' || (json.type !== 'suite' && json.type !== 'sequence')) throw new Error('Not a BIST script (root must be a BistSuite / BistSequence)');
   if (json.schema != null && json.schema !== bistLib.SCHEMA) toast(`File uses schema ${json.schema}, editor uses schema ${bistLib.SCHEMA} – review before saving.`, true);
   root = json; root.schema = bistLib.SCHEMA;
   fileHandle = handle ?? null; fileName = name; dirty = false;
@@ -1085,7 +1085,7 @@ function newFile() {
   const name = (prompt('Project name (e.g. My App):', '') ?? '').trim();
   if (!name) return;
   const id = name.normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd').replace(/Đ/g, 'D').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '') || 'project';
-  openRoot({ schema: bistLib.SCHEMA, type: 'group', id, name, cases: [{ type: 'unit', id: `${id}.1`, name: 'Test 1', steps: [{ cmd: 'expect', text: 'Hello' }] }] }, `${id}.bist`, null);
+  openRoot({ schema: bistLib.SCHEMA, type: 'suite', id, name, units: [{ type: 'case', id: `${id}.1`, name: 'Test 1', steps: [{ cmd: 'expect', text: 'Hello' }] }] }, `${id}.bist`, null);
   dirty = true; refreshCrumb();
 }
 let saving = false;
@@ -1661,8 +1661,8 @@ $('tree').addEventListener('keydown', (e) => {
   else if (e.altKey && e.key === 'ArrowRight') indentSel();
   else if (e.key === 'ArrowUp' && i > 0) select(order[i - 1]);
   else if (e.key === 'ArrowDown' && i < order.length - 1) select(order[i + 1]);
-  else if (e.key === 'ArrowLeft' && isGroup(sel) && !collapsed.has(sel)) toggle(sel);
-  else if (e.key === 'ArrowRight' && isGroup(sel) && collapsed.has(sel)) toggle(sel);
+  else if (e.key === 'ArrowLeft' && isSuite(sel) && !collapsed.has(sel)) toggle(sel);
+  else if (e.key === 'ArrowRight' && isSuite(sel) && collapsed.has(sel)) toggle(sel);
   else if (e.key === 'Delete') deleteSel();
   else return;
   e.preventDefault(); $('tree').focus();
@@ -1842,10 +1842,10 @@ function aiSystemPrompt() {
 Answer in the user's language, briefly.
 
 ## BIST model
-- A script is a tree: TestGroup (children independent; pre/after run around EACH child), TestSequence (children run in order, stop on failure; pre/after once), TestUnit (a test with steps).
-- Node fields: type ('group'|'sequence'|'unit'), name (required), id (optional, unique in the project, [A-Za-z0-9_.-]; used by runTest('<id>')), minVersion/maxVersion ('1.0.0+10'), manual (reason the test can't be automated), writes (true if it creates/changes data), pre, after, steps (unit only), cases (groups).
+- A script is a tree: BistSuite (children independent; pre/after run around EACH child), BistSequence (children run in order, stop on failure; pre/after once), BistCase (a test with steps).
+- Node fields: type ('suite'|'sequence'|'case'), name (required), id (optional, unique in the project, [A-Za-z0-9_.-]; used by runTest('<id>')), minVersion/maxVersion ('1.0.0+10'), manual (reason the test can't be automated), writes (true if it creates/changes data), pre, after, steps (unit only), units (groups).
 - Steps are BIST commands. In the editor each item's steps are written as JavaScript calling the BIST library:
-  export default { pre: [...], steps: [...], after: [...] }   (groups have only pre and after)
+  export default { pre: [...], steps: [...], after: [...] }   (suites have only pre and after)
 - Values may use {{now}}, {{date:+1}}, {{i}}, {{name}} (variables), env('key') for app / user / server info, and tc('Group','field') for test data provided by the app (BistProvider.testData, e.g. test accounts). Never write passwords.
 - Find widgets by text (visible text), id (Key), type ('button'|'input'|'text'|'image'), icon (e.g. 'add', 'logout'), route, inside (text of the containing card). Prefer visible text + type.
 
@@ -1871,7 +1871,7 @@ export default {
 \`\`\`
 2. Add a new item (JSON in BIST format, steps as {"cmd": ...} objects; parent = number, id or root):
 \`\`\`bist-add parent=1
-{"type":"unit","id":"login.new","name":"New test","steps":[{"cmd":"tap","text":"Save","type":"button"}]}
+{"type":"case","id":"login.new","name":"New test","steps":[{"cmd":"tap","text":"Save","type":"button"}]}
 \`\`\`
 Keep ids unique. Explain in one or two sentences before the block.
 
@@ -2145,15 +2145,15 @@ function applyAction(kind, target, body) {
     toast('Applied – Undo to revert');
     return;
   }
-  if (!isGroup(target)) throw new Error('parent must be a group');
+  if (!isSuite(target)) throw new Error('parent must be a suite');
   let node;
   try { node = JSON.parse(body); } catch (e) { throw new Error('invalid JSON: ' + e.message); }
-  const errs = bistLib.validate({ schema: bistLib.SCHEMA, type: 'group', id: '__check', name: 'check', cases: [node] }).filter((m) => !/^Root/.test(m));
+  const errs = bistLib.validate({ schema: bistLib.SCHEMA, type: 'suite', id: '__check', name: 'check', units: [node] }).filter((m) => !/^Root/.test(m));
   if (errs.length) throw new Error(errs[0]);
   const ids = new Set(); walk(root, (n) => n.id && ids.add(n.id));
   let dup = null; walk(node, (n) => { if (n.id && ids.has(n.id)) dup = n.id; });
   if (dup) throw new Error(`id "${dup}" already exists`);
-  target.cases.push(node); collapsed.delete(target);
+  target.units.push(node); collapsed.delete(target);
   changed(); select(node);
   toast('Added – Undo to revert');
 }

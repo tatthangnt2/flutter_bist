@@ -1,11 +1,11 @@
 {
   "schema": 4,
-  "type": "group",
+  "type": "suite",
   "id": "parity",
   "name": "Parity",
-  "cases": [
+  "units": [
     {
-      "type": "unit",
+      "type": "case",
       "id": "p.1",
       "name": "Lệnh mới",
       "steps": [
