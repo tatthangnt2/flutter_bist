@@ -158,4 +158,14 @@ void main() {
     await tester.pump();
     expect(find.byType(CircularProgressIndicator), findsNothing);
   });
+
+  test('BistLocalizationVi: Vietnamese texts, English defaults for the rest', () {
+    const vi = BistLocalizationVi();
+    expect(vi.run, 'Chạy');
+    expect(vi.tests(3), '3 bài');
+    expect(vi.stats(5, 2), '5 bài · 2 bài cần tester');
+    expect(vi.notForVersion('1.0.0'), 'không áp dụng cho bản 1.0.0');
+    expect(vi.units, const BistLocalizations().units);
+    expect(const BistLocalizationsDelegate({'vi': BistLocalizationVi()}).translations['vi'], isA<BistLocalizationVi>());
+  });
 }

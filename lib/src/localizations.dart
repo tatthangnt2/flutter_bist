@@ -77,6 +77,48 @@ class BistLocalizations {
   static String _status(BistStatus s) => s.label;
 }
 
+/// Vietnamese texts of [BistView] (tiếng Việt): `localizations: const BistLocalizationVi()` on [BistView] /
+/// [BistView.overlay], or by the app locale: `BistLocalizationsDelegate({'vi': BistLocalizationVi()})`.
+class BistLocalizationVi extends BistLocalizations {
+  const BistLocalizationVi()
+    : super(
+        noData: 'Dữ liệu, file đi kèm kịch bản – sẽ có sau',
+        noScripts: 'Chưa có kịch bản – Bist.init(scriptAssets: ...)',
+        noResults: 'Chưa chạy lần nào – giữ lâu một mục ở Test units để chạy',
+        sequential: 'tuần tự',
+        writes: '✎ ghi DEV',
+        needsTester: 'cần tester',
+        notApplicable: 'không áp dụng',
+        suite: 'Nhóm',
+        sequence: 'Nhóm chạy lần lượt',
+        test: 'Bài test',
+        tests: _viTests,
+        writesInfo: 'ghi dữ liệu – chỉ chạy trên máy chủ DEV',
+        needsTesterInfo: _viNeedsTesterInfo,
+        versions: _viVersions,
+        notForVersion: _viNotForVersion,
+        screenshotOnFailure: 'Chụp màn hình khi lỗi',
+        skipTester: 'Bỏ qua bài cần tester',
+        stats: _viStats,
+        cancel: 'Huỷ',
+        run: 'Chạy',
+        runAll: 'Chạy tất cả',
+        busy: 'Đang chạy mục khác',
+        close: 'Đóng',
+        inProgress: 'đang chạy',
+        runningUnit: 'Đang chạy…',
+        waiting: 'chờ chạy',
+        notReached: 'không chạy tới',
+        folder: 'Thư mục',
+      );
+}
+
+String _viTests(int n) => '$n bài';
+String _viStats(int total, int tester) => '$total bài · $tester bài cần tester';
+String _viNeedsTesterInfo(String reason) => 'cần tester: $reason';
+String _viVersions(String? min, String? max) => 'bản ${min ?? ''}..${max ?? ''}';
+String _viNotForVersion(String v) => 'không áp dụng cho bản $v';
+
 /// Loads [BistLocalizations] for the app locale (by language code); other languages get [fallback] (English by default).
 ///
 /// ```dart

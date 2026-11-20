@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- `BistLocalizationVi`: Vietnamese texts of the BIST UI (`localizations: const BistLocalizationVi()` or
+  `BistLocalizationsDelegate({'vi': BistLocalizationVi()})`), moved from flutter_tlt.
 - Files: `lib/src/model.dart` renamed `lib/src/unit.dart` (script tree, validation; `lib/src/action.dart` is its part);
   `TestVersion` moved to `lib/src/bist.dart`. Still all exported by `package:flutter_bist/flutter_bist.dart`.
 - Breaking: script classes take the `Bist` prefix – `TestAction` → `BistAction`, `TestUnit` → `BistUnit`, `TestCase` →
